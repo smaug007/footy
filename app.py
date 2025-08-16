@@ -10,6 +10,8 @@ from data.data_importer import import_season, update_recent_statistics
 from data.accuracy_tracker import get_system_overview
 from data.data_processor import get_data_summary, import_more_corner_stats
 from data.team_analyzer import analyze_team, compare_teams
+from data.consistency_analyzer import predict_match_corners
+from data.prediction_engine import predict_match_comprehensive, find_betting_opportunities
 import logging
 
 def create_app():
@@ -390,6 +392,156 @@ def register_routes(app):
             return jsonify({
                 'status': 'error',
                 'message': f'Failed to get data summary: {str(e)}',
+                'data': {}
+            }), 500
+    
+    @app.route('/api/predict-match')
+    def api_predict_match():
+        """Generate corner prediction for a match."""
+        try:
+            home_team_id = request.args.get('home_team_id', type=int)
+            away_team_id = request.args.get('away_team_id', type=int)
+            season = request.args.get('season', 2024, type=int)
+            
+            if not home_team_id or not away_team_id:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Both home_team_id and away_team_id parameters are required',
+                    'data': {}
+                }), 400
+            
+            # Generate comprehensive prediction
+            prediction = predict_match_comprehensive(home_team_id, away_team_id, season)
+            
+            if not prediction:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Insufficient data for prediction (need at least 3 matches per team)',
+                    'data': {}
+                }), 404
+            
+            # Convert prediction to dict for JSON serialization
+            prediction_dict = {
+                'match_info': {
+                    'home_team': prediction.home_team_name,
+                    'away_team': prediction.away_team_name,
+                    'season': prediction.season
+                },
+                'predictions': {
+                    'total_corners': prediction.predicted_total_corners,
+                    'home_corners': prediction.predicted_home_corners,
+                    'away_corners': prediction.predicted_away_corners,
+                    'expected_range': {
+                        'min': prediction.expected_total_range[0],
+                        'max': prediction.expected_total_range[1]
+                    },
+                    'most_likely_outcome': prediction.most_likely_outcome
+                },
+                'line_predictions': {
+                    'over_5_5': {
+                        'prediction': prediction.over_5_5_prediction,
+                        'confidence': prediction.over_5_5_confidence
+                    },
+                    'over_6_5': {
+                        'prediction': prediction.over_6_5_prediction,
+                        'confidence': prediction.over_6_5_confidence
+                    },
+                    'over_7_5': {
+                        'prediction': prediction.over_7_5_prediction,
+                        'confidence': prediction.over_7_5_confidence
+                    }
+                },
+                'quality_metrics': {
+                    'prediction_quality': prediction.prediction_quality,
+                    'statistical_confidence': prediction.statistical_confidence,
+                    'data_reliability': prediction.data_reliability,
+                    'consistency_score': prediction.consistency_score
+                },
+                'team_analysis': {
+                    'home_team_form': prediction.home_team_form,
+                    'away_team_form': prediction.away_team_form
+                },
+                'analysis': {
+                    'summary': prediction.analysis_summary,
+                    'recommendation': prediction.recommendation
+                }
+            }
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'Corner prediction for {prediction.home_team_name} vs {prediction.away_team_name}',
+                'data': prediction_dict
+            })
+            
+        except Exception as e:
+            app.logger.error(f'Error generating match prediction: {e}')
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to generate prediction: {str(e)}',
+                'data': {}
+            }), 500
+    
+    @app.route('/api/betting-opportunities')
+    def api_betting_opportunities():
+        """Find best betting opportunities from upcoming fixtures."""
+        try:
+            season = request.args.get('season', 2024, type=int)
+            min_confidence = request.args.get('min_confidence', 70.0, type=float)
+            
+            # Get upcoming fixtures
+            client = get_api_client()
+            fixtures_response = client.get_upcoming_fixtures()
+            fixtures = fixtures_response.get('response', [])
+            
+            if not fixtures:
+                return jsonify({
+                    'status': 'success',
+                    'message': 'No upcoming fixtures found',
+                    'data': {'opportunities': [], 'total_matches_analyzed': 0}
+                })
+            
+            # Convert fixtures to match list (limit to avoid too many API calls)
+            match_list = []
+            db_manager = get_db_manager()
+            
+            for fixture in fixtures[:10]:  # Limit to first 10 fixtures
+                teams_info = fixture.get('teams', {})
+                home_api_id = teams_info.get('home', {}).get('id')
+                away_api_id = teams_info.get('away', {}).get('id')
+                
+                if home_api_id and away_api_id:
+                    # Get database team IDs
+                    home_team = db_manager.get_team_by_api_id(home_api_id, season)
+                    away_team = db_manager.get_team_by_api_id(away_api_id, season)
+                    
+                    if home_team and away_team:
+                        match_list.append((home_team['id'], away_team['id']))
+            
+            if not match_list:
+                return jsonify({
+                    'status': 'success',
+                    'message': 'No upcoming fixtures with sufficient team data',
+                    'data': {'opportunities': [], 'total_matches_analyzed': 0}
+                })
+            
+            # Find betting opportunities
+            opportunities = find_betting_opportunities(match_list, season, min_confidence)
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'Found {len(opportunities)} betting opportunities',
+                'data': {
+                    'opportunities': opportunities,
+                    'total_matches_analyzed': len(match_list),
+                    'min_confidence_threshold': min_confidence
+                }
+            })
+            
+        except Exception as e:
+            app.logger.error(f'Error finding betting opportunities: {e}')
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to find betting opportunities: {str(e)}',
                 'data': {}
             }), 500
     
