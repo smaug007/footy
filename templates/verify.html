@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Verify Match - China Super League{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-8 mx-auto">
+        <div class="card">
+            <div class="card-header bg-warning text-dark">
+                <h4 class="mb-0">
+                    <i class="fas fa-check-circle"></i> Match Verification
+                </h4>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info" role="alert">
+                    <strong>Match ID:</strong> {{ match_id }}
+                    <br><small>Manual verification system will be implemented in Phase 2</small>
+                </div>
+
+                <!-- Verification form placeholder -->
+                <form id="verification-form">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="home-corners" class="form-label">Home Team Corners</label>
+                                <input type="number" class="form-control" id="home-corners" min="0" max="20" disabled>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="away-corners" class="form-label">Away Team Corners</label>
+                                <input type="number" class="form-control" id="away-corners" min="0" max="20" disabled>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="match-notes" class="form-label">Notes (Optional)</label>
+                        <textarea class="form-control" id="match-notes" rows="3" disabled 
+                                  placeholder="Any additional notes about the match..."></textarea>
+                    </div>
+
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-warning btn-lg" disabled>
+                            <i class="fas fa-save"></i> Verify & Update Accuracy
+                        </button>
+                    </div>
+                </form>
+
+                <!-- Back to dashboard -->
+                <div class="text-center mt-3">
+                    <a href="{{ url_for('accuracy_dashboard') }}" class="btn btn-outline-secondary">
+                        <i class="fas fa-arrow-left"></i> Back to Accuracy Dashboard
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('verification-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    alert('Match verification functionality will be implemented in Phase 2!');
+});
+</script>
+{% endblock %}

@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block title %}Corner Predictions - China Super League{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-8 mx-auto">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h4 class="mb-0">
+                    <i class="fas fa-futbol"></i> China Super League Corner Predictions
+                </h4>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info" role="alert">
+                    <strong>Welcome!</strong> This system predicts corner kicks for China Super League matches using consistency-based analysis.
+                    <br><small>Phase 1 Development - Basic structure ready, API integration coming soon.</small>
+                </div>
+
+                <!-- Fixture Selection Form -->
+                <form id="prediction-form">
+                    <div class="mb-3">
+                        <label for="fixture-select" class="form-label">Select Upcoming Match</label>
+                        <select class="form-select" id="fixture-select" required>
+                            <option value="">Choose a match...</option>
+                            <!-- Options will be populated via API -->
+                            <option value="demo" disabled>Shanghai SIPG vs Guangzhou FC (Demo)</option>
+                            <option value="demo2" disabled>Beijing Guoan vs Shandong Taishan (Demo)</option>
+                        </select>
+                    </div>
+
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary btn-lg" disabled>
+                            <i class="fas fa-chart-line"></i> Generate Prediction
+                        </button>
+                    </div>
+                </form>
+
+                <!-- Prediction Results (Hidden initially) -->
+                <div id="prediction-results" class="mt-4" style="display: none;">
+                    <hr>
+                    <h5>Prediction Results</h5>
+                    <div id="results-content">
+                        <!-- Results will be populated here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Status Card -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5 class="mb-0">System Status</h5>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-md-3">
+                        <div class="text-primary">
+                            <i class="fas fa-database fa-2x"></i>
+                            <p class="mt-2 mb-0"><strong>Database</strong></p>
+                            <small class="text-muted">Setting up...</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-warning">
+                            <i class="fas fa-plug fa-2x"></i>
+                            <p class="mt-2 mb-0"><strong>API</strong></p>
+                            <small class="text-muted">Pending</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-warning">
+                            <i class="fas fa-brain fa-2x"></i>
+                            <p class="mt-2 mb-0"><strong>AI Model</strong></p>
+                            <small class="text-muted">Pending</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-warning">
+                            <i class="fas fa-chart-bar fa-2x"></i>
+                            <p class="mt-2 mb-0"><strong>Accuracy</strong></p>
+                            <small class="text-muted">Pending</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('prediction-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    alert('Prediction functionality will be implemented in Phase 2!');
+});
+</script>
+{% endblock %}
