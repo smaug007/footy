@@ -4,6 +4,7 @@ Main Flask application for China Super League corner prediction system.
 from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 from config import Config
+from data.api_client import get_api_client, APIException
 import logging
 
 def create_app():
@@ -56,12 +57,57 @@ def register_routes(app):
     @app.route('/api/fixtures')
     def api_fixtures():
         """Get upcoming CSL fixtures."""
-        # TODO: Implement in Phase 1 Day 3-4
-        return jsonify({
-            'status': 'success',
-            'message': 'API endpoint ready - implementation pending',
-            'data': []
-        })
+        try:
+            client = get_api_client()
+            
+            # Get upcoming fixtures (Not Started)
+            upcoming_response = client.get_upcoming_fixtures()
+            upcoming_fixtures = upcoming_response.get('response', [])
+            
+            # Format fixtures for frontend
+            formatted_fixtures = []
+            for fixture in upcoming_fixtures[:20]:  # Limit to 20 fixtures
+                fixture_info = fixture.get('fixture', {})
+                teams = fixture.get('teams', {})
+                league = fixture.get('league', {})
+                
+                formatted_fixtures.append({
+                    'id': fixture_info.get('id'),
+                    'date': fixture_info.get('date'),
+                    'home_team': {
+                        'id': teams.get('home', {}).get('id'),
+                        'name': teams.get('home', {}).get('name'),
+                        'logo': teams.get('home', {}).get('logo')
+                    },
+                    'away_team': {
+                        'id': teams.get('away', {}).get('id'),
+                        'name': teams.get('away', {}).get('name'),
+                        'logo': teams.get('away', {}).get('logo')
+                    },
+                    'venue': fixture_info.get('venue', {}).get('name'),
+                    'status': fixture_info.get('status', {}).get('long')
+                })
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'Found {len(formatted_fixtures)} upcoming fixtures',
+                'data': formatted_fixtures
+            })
+            
+        except APIException as e:
+            app.logger.error(f'API error getting fixtures: {e}')
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to get fixtures: {str(e)}',
+                'data': []
+            }), 500
+        except Exception as e:
+            app.logger.error(f'Unexpected error getting fixtures: {e}')
+            return jsonify({
+                'status': 'error',
+                'message': 'Internal server error',
+                'data': []
+            }), 500
     
     @app.route('/api/predict', methods=['POST'])
     def api_predict():
@@ -76,12 +122,54 @@ def register_routes(app):
     @app.route('/api/teams')
     def api_teams():
         """Get team statistics."""
-        # TODO: Implement in Phase 2
-        return jsonify({
-            'status': 'success',
-            'message': 'Teams endpoint ready - implementation pending',
-            'data': []
-        })
+        try:
+            client = get_api_client()
+            season = request.args.get('season', 2024, type=int)
+            
+            # Get CSL teams
+            teams_response = client.get_china_super_league_teams(season)
+            teams = teams_response.get('response', [])
+            
+            # Format teams for frontend
+            formatted_teams = []
+            for team in teams:
+                team_info = team.get('team', {})
+                venue_info = team.get('venue', {})
+                
+                formatted_teams.append({
+                    'id': team_info.get('id'),
+                    'name': team_info.get('name'),
+                    'code': team_info.get('code'),
+                    'logo': team_info.get('logo'),
+                    'country': team_info.get('country'),
+                    'founded': team_info.get('founded'),
+                    'venue': {
+                        'name': venue_info.get('name'),
+                        'capacity': venue_info.get('capacity'),
+                        'city': venue_info.get('city')
+                    }
+                })
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'Found {len(formatted_teams)} teams for season {season}',
+                'data': formatted_teams
+            })
+            
+        except APIException as e:
+            app.logger.error(f'API error getting teams: {e}')
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to get teams: {str(e)}',
+                'data': []
+            }), 500
+        except Exception as e:
+            app.logger.error(f'Unexpected error getting teams: {e}')
+            return jsonify({
+                'status': 'error',
+                'message': 'Internal server error',
+                'data': []
+            }), 500
     
     @app.route('/api/accuracy')
     def api_accuracy():
@@ -102,6 +190,43 @@ def register_routes(app):
             'message': f'Verification endpoint ready for match {match_id} - implementation pending',
             'data': {}
         })
+    
+    @app.route('/api/status')
+    def api_status():
+        """Get API and system status."""
+        try:
+            client = get_api_client()
+            
+            # Check API health
+            is_healthy = client.health_check()
+            rate_status = client.get_rate_limit_status()
+            
+            return jsonify({
+                'status': 'success',
+                'data': {
+                    'api_healthy': is_healthy,
+                    'api_key_configured': bool(Config.API_FOOTBALL_KEY),
+                    'rate_limits': rate_status,
+                    'endpoints': {
+                        'leagues': '/api/leagues' if is_healthy else 'unavailable',
+                        'fixtures': '/api/fixtures' if is_healthy else 'unavailable', 
+                        'teams': '/api/teams' if is_healthy else 'unavailable',
+                        'statistics': 'available' if is_healthy else 'unavailable'
+                    }
+                }
+            })
+            
+        except Exception as e:
+            app.logger.error(f'Error getting API status: {e}')
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to get API status',
+                'data': {
+                    'api_healthy': False,
+                    'api_key_configured': bool(Config.API_FOOTBALL_KEY),
+                    'error': str(e)
+                }
+            }), 500
     
     @app.errorhandler(404)
     def not_found(error):

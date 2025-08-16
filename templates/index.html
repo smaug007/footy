@@ -22,15 +22,12 @@
                     <div class="mb-3">
                         <label for="fixture-select" class="form-label">Select Upcoming Match</label>
                         <select class="form-select" id="fixture-select" required>
-                            <option value="">Choose a match...</option>
-                            <!-- Options will be populated via API -->
-                            <option value="demo" disabled>Shanghai SIPG vs Guangzhou FC (Demo)</option>
-                            <option value="demo2" disabled>Beijing Guoan vs Shandong Taishan (Demo)</option>
+                            <option value="">Loading fixtures...</option>
                         </select>
                     </div>
 
                     <div class="d-grid">
-                        <button type="submit" class="btn btn-primary btn-lg" disabled>
+                        <button type="submit" class="btn btn-primary btn-lg" id="predict-btn">
                             <i class="fas fa-chart-line"></i> Generate Prediction
                         </button>
                     </div>
@@ -47,15 +44,15 @@
             </div>
         </div>
 
-        <!-- System Status Card -->
+                        <!-- System Status Card -->
         <div class="card mt-4">
             <div class="card-header">
                 <h5 class="mb-0">System Status</h5>
             </div>
             <div class="card-body">
-                <div class="row text-center">
+                <div class="row text-center" id="system-status">
                     <div class="col-md-3">
-                        <div class="text-primary">
+                        <div class="text-warning">
                             <i class="fas fa-database fa-2x"></i>
                             <p class="mt-2 mb-0"><strong>Database</strong></p>
                             <small class="text-muted">Setting up...</small>
@@ -65,7 +62,7 @@
                         <div class="text-warning">
                             <i class="fas fa-plug fa-2x"></i>
                             <p class="mt-2 mb-0"><strong>API</strong></p>
-                            <small class="text-muted">Pending</small>
+                            <small class="text-muted">Checking...</small>
                         </div>
                     </div>
                     <div class="col-md-3">
@@ -83,6 +80,15 @@
                         </div>
                     </div>
                 </div>
+                
+                <!-- API Status Details -->
+                <div class="mt-3" id="api-details" style="display: none;">
+                    <small class="text-muted">
+                        <strong>API Status:</strong> <span id="api-status-text">Checking...</span><br>
+                        <strong>Daily Calls:</strong> <span id="daily-calls">-/-</span><br>
+                        <strong>Teams Available:</strong> <span id="teams-count">-</span>
+                    </small>
+                </div>
             </div>
         </div>
     </div>
@@ -95,9 +101,109 @@
 
 {% block extra_js %}
 <script>
+// Load fixtures and system status when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    loadSystemStatus();
+    loadFixtures();
+});
+
+// Load system status
+async function loadSystemStatus() {
+    try {
+        const response = await fetch('/api/status');
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            const statusData = data.data;
+            
+            // Update API status
+            const apiElement = document.querySelector('#system-status .col-md-3:nth-child(2) div');
+            if (statusData.api_healthy) {
+                apiElement.className = 'text-success';
+                apiElement.querySelector('small').textContent = 'Connected';
+            } else {
+                apiElement.className = 'text-danger';
+                apiElement.querySelector('small').textContent = 'Error';
+            }
+            
+            // Show API details
+            document.getElementById('api-details').style.display = 'block';
+            document.getElementById('api-status-text').textContent = statusData.api_healthy ? 'Connected' : 'Error';
+            
+            const rateLimits = statusData.rate_limits || {};
+            document.getElementById('daily-calls').textContent = 
+                `${rateLimits.daily_calls || 0}/${rateLimits.daily_limit || 0}`;
+        }
+    } catch (error) {
+        console.error('Failed to load system status:', error);
+    }
+}
+
+// Load fixtures
+async function loadFixtures() {
+    const fixtureSelect = document.getElementById('fixture-select');
+    const predictBtn = document.getElementById('predict-btn');
+    
+    try {
+        const response = await fetch('/api/fixtures');
+        const data = await response.json();
+        
+        // Clear loading option
+        fixtureSelect.innerHTML = '<option value="">Choose a match...</option>';
+        
+        if (data.status === 'success' && data.data.length > 0) {
+            data.data.forEach(fixture => {
+                const option = document.createElement('option');
+                option.value = fixture.id;
+                
+                const homeTeam = fixture.home_team.name;
+                const awayTeam = fixture.away_team.name;
+                const date = new Date(fixture.date).toLocaleDateString();
+                
+                option.textContent = `${homeTeam} vs ${awayTeam} (${date})`;
+                fixtureSelect.appendChild(option);
+            });
+            
+            predictBtn.disabled = false;
+            
+            // Update teams count in status
+            document.getElementById('teams-count').textContent = `${data.data.length} fixtures`;
+        } else {
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = 'No upcoming fixtures available';
+            option.disabled = true;
+            fixtureSelect.appendChild(option);
+            
+            predictBtn.disabled = true;
+        }
+    } catch (error) {
+        console.error('Failed to load fixtures:', error);
+        fixtureSelect.innerHTML = '<option value="">Error loading fixtures</option>';
+        predictBtn.disabled = true;
+    }
+}
+
+// Handle form submission
 document.getElementById('prediction-form').addEventListener('submit', function(e) {
     e.preventDefault();
-    alert('Prediction functionality will be implemented in Phase 2!');
+    
+    const fixtureId = document.getElementById('fixture-select').value;
+    if (!fixtureId) {
+        alert('Please select a match first!');
+        return;
+    }
+    
+    // Show that prediction functionality is coming in Phase 2
+    const selectedOption = document.getElementById('fixture-select').selectedOptions[0];
+    const matchName = selectedOption.textContent;
+    
+    CSLPredictions.showAlert(
+        `Prediction for "${matchName}" will be available in Phase 2! 🚀<br>` +
+        `<small>The system will analyze historical corner data and generate predictions with confidence levels.</small>`,
+        'info',
+        5000
+    );
 });
 </script>
 {% endblock %}
