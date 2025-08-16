@@ -8,6 +8,8 @@ from data.api_client import get_api_client, APIException
 from data.database import get_db_manager
 from data.data_importer import import_season, update_recent_statistics
 from data.accuracy_tracker import get_system_overview
+from data.data_processor import get_data_summary, import_more_corner_stats
+from data.team_analyzer import analyze_team, compare_teams
 import logging
 
 def create_app():
@@ -256,6 +258,139 @@ def register_routes(app):
                     'api_key_configured': bool(Config.API_FOOTBALL_KEY),
                     'error': str(e)
                 }
+            }), 500
+    
+    @app.route('/api/team-analysis/<int:team_id>')
+    def api_team_analysis(team_id):
+        """Get comprehensive team corner analysis."""
+        try:
+            season = request.args.get('season', 2024, type=int)
+            
+            # Get team analysis
+            team_analysis = analyze_team(team_id, season)
+            
+            if not team_analysis:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Insufficient data for team analysis (need at least {Config.MIN_GAMES_FOR_PREDICTION} matches)',
+                    'data': {}
+                }), 404
+            
+            # Convert dataclass to dict for JSON serialization
+            analysis_dict = {
+                'team_id': team_analysis.team_id,
+                'team_name': team_analysis.team_name,
+                'season': team_analysis.season,
+                'matches_analyzed': team_analysis.matches_analyzed,
+                'analysis_date': team_analysis.analysis_date,
+                
+                'corners_won': {
+                    'average': team_analysis.corners_won_avg,
+                    'median': team_analysis.corners_won_median,
+                    'std_dev': team_analysis.corners_won_std,
+                    'min': team_analysis.corners_won_min,
+                    'max': team_analysis.corners_won_max,
+                    'consistency': team_analysis.corners_won_consistency,
+                    'trend': team_analysis.corners_won_trend,
+                    'reliability_90': team_analysis.corners_won_reliability_90,
+                    'recent_form': team_analysis.corners_won_recent_form
+                },
+                
+                'corners_conceded': {
+                    'average': team_analysis.corners_conceded_avg,
+                    'median': team_analysis.corners_conceded_median,
+                    'std_dev': team_analysis.corners_conceded_std,
+                    'min': team_analysis.corners_conceded_min,
+                    'max': team_analysis.corners_conceded_max,
+                    'consistency': team_analysis.corners_conceded_consistency,
+                    'trend': team_analysis.corners_conceded_trend,
+                    'reliability_90': team_analysis.corners_conceded_reliability_90,
+                    'recent_form': team_analysis.corners_conceded_recent_form
+                },
+                
+                'advanced_metrics': {
+                    'home_away_split': team_analysis.home_away_split,
+                    'vs_opponent_strength': team_analysis.vs_opponent_strength,
+                    'monthly_trends': team_analysis.monthly_trends,
+                    'form_analysis': team_analysis.form_analysis,
+                    'prediction_difficulty': team_analysis.prediction_difficulty
+                }
+            }
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'Team analysis for {team_analysis.team_name}',
+                'data': analysis_dict
+            })
+            
+        except Exception as e:
+            app.logger.error(f'Error getting team analysis for team {team_id}: {e}')
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to analyze team: {str(e)}',
+                'data': {}
+            }), 500
+    
+    @app.route('/api/team-comparison')
+    def api_team_comparison():
+        """Compare two teams' corner statistics."""
+        try:
+            team1_id = request.args.get('team1_id', type=int)
+            team2_id = request.args.get('team2_id', type=int)
+            season = request.args.get('season', 2024, type=int)
+            
+            if not team1_id or not team2_id:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Both team1_id and team2_id parameters are required',
+                    'data': {}
+                }), 400
+            
+            # Get team comparison
+            comparison = compare_teams(team1_id, team2_id, season)
+            
+            if 'error' in comparison:
+                return jsonify({
+                    'status': 'error',
+                    'message': comparison['error'],
+                    'data': {}
+                }), 404
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'Team comparison: {comparison["team1"]["name"]} vs {comparison["team2"]["name"]}',
+                'data': comparison
+            })
+            
+        except Exception as e:
+            app.logger.error(f'Error comparing teams: {e}')
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to compare teams: {str(e)}',
+                'data': {}
+            }), 500
+    
+    @app.route('/api/data-summary')
+    def api_data_summary():
+        """Get historical data summary."""
+        try:
+            season = request.args.get('season', 2024, type=int)
+            
+            # Get data summary
+            data_summary = get_data_summary(season)
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'Data summary for season {season}',
+                'data': data_summary
+            })
+            
+        except Exception as e:
+            app.logger.error(f'Error getting data summary: {e}')
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to get data summary: {str(e)}',
+                'data': {}
             }), 500
     
     @app.route('/api/import-data', methods=['POST'])
