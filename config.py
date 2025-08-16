@@ -15,7 +15,7 @@ class Config:
     DEBUG = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
     
     # API-Football settings
-    API_FOOTBALL_KEY = os.getenv('API_FOOTBALL_KEY')
+    API_FOOTBALL_KEY = 'b0badb43a87123d1b131f6c1b0e62cf2'
     API_FOOTBALL_HOST = 'v3.football.api-sports.io'
     API_BASE_URL = f'https://{API_FOOTBALL_HOST}'
     
@@ -42,5 +42,5 @@ class Config:
     def validate_config():
         """Validate that required configuration is present."""
         if not Config.API_FOOTBALL_KEY:
-            raise ValueError("API_FOOTBALL_KEY environment variable is required")
+            raise ValueError("API_FOOTBALL_KEY is required")
         return True
