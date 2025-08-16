@@ -5,6 +5,9 @@ from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 from config import Config
 from data.api_client import get_api_client, APIException
+from data.database import get_db_manager
+from data.data_importer import import_season, update_recent_statistics
+from data.accuracy_tracker import get_system_overview
 import logging
 
 def create_app():
@@ -174,12 +177,39 @@ def register_routes(app):
     @app.route('/api/accuracy')
     def api_accuracy():
         """Get accuracy statistics."""
-        # TODO: Implement in Phase 2
-        return jsonify({
-            'status': 'success',
-            'message': 'Accuracy endpoint ready - implementation pending',
-            'data': {}
-        })
+        try:
+            season = request.args.get('season', 2024, type=int)
+            
+            # Get system accuracy overview
+            accuracy_overview = get_system_overview(season)
+            
+            # Get database statistics
+            db_manager = get_db_manager()
+            db_stats = db_manager.get_database_stats()
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'Accuracy statistics for season {season}',
+                'data': {
+                    'season': season,
+                    'accuracy_overview': accuracy_overview,
+                    'database_stats': {
+                        'total_teams': db_stats.get('teams_count', 0),
+                        'total_matches': db_stats.get('matches_count', 0),
+                        'total_predictions': db_stats.get('predictions_count', 0),
+                        'verified_results': db_stats.get('prediction_results_count', 0)
+                    },
+                    'available_seasons': db_stats.get('seasons', [])
+                }
+            })
+            
+        except Exception as e:
+            app.logger.error(f'Error getting accuracy statistics: {e}')
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to get accuracy statistics: {str(e)}',
+                'data': {}
+            }), 500
     
     @app.route('/api/verify-match/<int:match_id>', methods=['POST'])
     def api_verify_match(match_id):
@@ -226,6 +256,34 @@ def register_routes(app):
                     'api_key_configured': bool(Config.API_FOOTBALL_KEY),
                     'error': str(e)
                 }
+            }), 500
+    
+    @app.route('/api/import-data', methods=['POST'])
+    def api_import_data():
+        """Import or update season data."""
+        try:
+            data = request.get_json() or {}
+            season = data.get('season', 2024)
+            import_statistics = data.get('import_statistics', True)
+            
+            # Import season data
+            if import_statistics:
+                result = import_season(season, include_statistics=True)
+            else:
+                result = import_season(season, include_statistics=False)
+            
+            return jsonify({
+                'status': 'success',
+                'message': f'Successfully imported data for season {season}',
+                'data': result
+            })
+            
+        except Exception as e:
+            app.logger.error(f'Error importing data: {e}')
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to import data: {str(e)}',
+                'data': {}
             }), 500
     
     @app.errorhandler(404)
