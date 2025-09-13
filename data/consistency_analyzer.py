@@ -46,6 +46,7 @@ class ConsistencyAnalysis:
     predicted_away_corners: float
     match_consistency_score: float
     prediction_confidence: Dict[str, float]
+    calculation_details: Optional[Dict] = None
 
 @dataclass
 class PredictionResult:
@@ -74,6 +75,7 @@ class PredictionResult:
     # Detailed analysis
     consistency_analysis: ConsistencyAnalysis
     analysis_report: str
+    calculation_details: Optional[Dict] = None
 
 class ConsistencyAnalyzer:
     """Advanced consistency analyzer for corner predictions."""
@@ -85,12 +87,15 @@ class ConsistencyAnalyzer:
         logger.info("Consistency Analyzer initialized")
     
     def analyze_match_consistency(self, home_team_id: int, away_team_id: int, 
-                                season: int) -> Optional[ConsistencyAnalysis]:
+                                season: int, cutoff_date = None) -> Optional[ConsistencyAnalysis]:
         """Perform comprehensive consistency analysis for a match."""
         try:
-            # Get team analyses
-            home_analysis = self.team_analyzer.analyze_team_corners(home_team_id, season)
-            away_analysis = self.team_analyzer.analyze_team_corners(away_team_id, season)
+            # Get team analyses (with cutoff date for backtesting)
+            home_analysis = self.team_analyzer.analyze_team_corners(home_team_id, season, cutoff_date=cutoff_date)
+            away_analysis = self.team_analyzer.analyze_team_corners(away_team_id, season, cutoff_date=cutoff_date)
+            
+            if cutoff_date:
+                logger.info(f"🕐 Analyzing consistency with cutoff date: {cutoff_date}")
             
             if not home_analysis or not away_analysis:
                 logger.warning(f"Insufficient data for consistency analysis")
@@ -105,7 +110,7 @@ class ConsistencyAnalyzer:
             )
             
             # Calculate prediction confidence
-            prediction_confidence = self._calculate_prediction_confidence(
+            prediction_confidence, calculation_details = self._calculate_prediction_confidence(
                 home_analysis, away_analysis, predicted_total
             )
             
@@ -144,7 +149,8 @@ class ConsistencyAnalyzer:
                 predicted_home_corners=predicted_home,
                 predicted_away_corners=predicted_away,
                 match_consistency_score=match_consistency,
-                prediction_confidence=prediction_confidence
+                prediction_confidence=prediction_confidence,
+                calculation_details=calculation_details
             )
             
             logger.info(f"Consistency analysis completed: {home_analysis.team_name} vs {away_analysis.team_name}")
@@ -238,48 +244,220 @@ class ConsistencyAnalyzer:
     
     def _calculate_prediction_confidence(self, home_analysis: TeamCornerAnalysis, 
                                        away_analysis: TeamCornerAnalysis, 
-                                       predicted_total: float) -> Dict[str, float]:
-        """Calculate statistical confidence for predictions."""
+                                       predicted_total: float) -> Tuple[Dict[str, float], Dict]:
+        """Calculate dynamic confidence based on actual team line performance."""
         
-        # Base confidence from team consistency
-        avg_consistency = (
-            home_analysis.corners_won_consistency + 
-            home_analysis.corners_conceded_consistency +
-            away_analysis.corners_won_consistency + 
-            away_analysis.corners_conceded_consistency
-        ) / 4
-        
-        # Data quality factor
-        min_matches = min(home_analysis.matches_analyzed, away_analysis.matches_analyzed)
-        data_quality_factor = min(1.0, min_matches / 10)  # Full confidence with 10+ matches
-        
-        # Calculate line confidences using normal distribution
-        std_dev = 2.5  # Typical corner standard deviation
+        # Get database connection for historical match data
+        db_manager = get_db_manager()
         
         lines = [5.5, 6.5, 7.5, 8.5]
         line_confidences = {}
         
-        for line in lines:
-            z_score = (predicted_total - line) / std_dev
-            base_confidence = norm.cdf(z_score) * 100
-            
-            # Adjust based on consistency and data quality
-            consistency_multiplier = 0.7 + (avg_consistency / 100) * 0.6  # Range: 0.7-1.3
-            data_multiplier = 0.8 + (data_quality_factor * 0.4)  # Range: 0.8-1.2
-            
-            adjusted_confidence = base_confidence * consistency_multiplier * data_multiplier
-            adjusted_confidence = max(5, min(95, adjusted_confidence))  # Cap between 5-95%
-            
-            line_confidences[f'over_{line}'] = adjusted_confidence
+        calculation_details = {}
         
-        return line_confidences
+        for line in lines:
+            confidence, breakdown = self._calculate_dynamic_line_confidence(
+                home_analysis, away_analysis, line, db_manager
+            )
+            line_confidences[f'over_{line}'] = confidence
+            calculation_details[f'over_{line}'] = breakdown
+        
+        return line_confidences, calculation_details
+    
+    def _calculate_dynamic_line_confidence(self, home_analysis: TeamCornerAnalysis, 
+                                         away_analysis: TeamCornerAnalysis,
+                                         line_value: float, db_manager) -> Tuple[float, Dict]:
+        """Calculate dynamic confidence for a specific line based on team performance."""
+        
+        # Get historical matches for both teams
+        home_matches = db_manager.get_team_matches(home_analysis.team_id, home_analysis.season, limit=20)
+        away_matches = db_manager.get_team_matches(away_analysis.team_id, away_analysis.season, limit=20)
+        
+        # Calculate individual team line performance with venue weighting
+        home_line_rate = self._calculate_team_line_performance(home_matches, home_analysis.team_id, line_value, is_home_team=True)
+        away_line_rate = self._calculate_team_line_performance(away_matches, away_analysis.team_id, line_value, is_home_team=False)
+        
+        # Base confidence (average of both teams)
+        base_confidence = (home_line_rate + away_line_rate) / 2
+        
+        # Sample size penalty (minimum 7 games for reliable confidence)
+        home_games = len(home_matches) if home_matches else 0
+        away_games = len(away_matches) if away_matches else 0
+        min_games = min(home_games, away_games)
+        
+        if min_games < 7:
+            # Penalty for insufficient data
+            sample_penalty = min_games / 7  # e.g., 5 games = 0.71 multiplier
+        else:
+            sample_penalty = 1.0  # No penalty
+        
+        # Consistency factor based on team reliability
+        consistency_factor = self._calculate_team_consistency_factor(
+            home_analysis, away_analysis, home_games, away_games
+        )
+        
+        # Final confidence calculation
+        final_confidence = base_confidence * sample_penalty * consistency_factor
+        
+        # Only minimum limit (5% minimum, no maximum cap)
+        final_confidence = max(5.0, final_confidence)
+        
+        # Create calculation breakdown for analysis display
+        calculation_breakdown = {
+            'home_line_rate': home_line_rate,
+            'away_line_rate': away_line_rate, 
+            'base_confidence': base_confidence,
+            'sample_penalty': sample_penalty,
+            'consistency_factor': consistency_factor,
+            'final_confidence': final_confidence,
+            'home_games': home_games,
+            'away_games': away_games,
+            'min_games': min_games
+        }
+        
+        return final_confidence, calculation_breakdown
+    
+    def _calculate_team_line_performance(self, matches: List[Dict], team_id: int, line_value: float, is_home_team: bool = True) -> float:
+        """Calculate team's historical performance for a specific line with venue weighting."""
+        if not matches:
+            return 50.0  # Default neutral confidence
+        
+        over_count = 0
+        total_count = len(matches)
+        
+        # Weight recent games and venue relevance
+        weighted_over = 0.0
+        total_weight = 0.0
+        venue_weighting_applied = False
+        venue_weighting_error = None
+        
+        try:
+            # Count venue-specific games for minimum threshold
+            relevant_venue_games = 0
+            for match in matches:
+                is_team_playing_home = match.get('home_team_id') == team_id
+                if (is_home_team and is_team_playing_home) or (not is_home_team and not is_team_playing_home):
+                    relevant_venue_games += 1
+            
+            # Apply venue weighting only if we have sufficient data (3+ games at relevant venue)
+            use_venue_weighting = relevant_venue_games >= 3
+            
+            for i, match in enumerate(matches):
+                home_corners = match.get('corners_home', 0) or 0
+                away_corners = match.get('corners_away', 0) or 0
+                match_total = home_corners + away_corners
+                
+                # Time-based weighting (recent games matter more)
+                time_weight = np.exp(-0.05 * i)
+                
+                # Venue-based weighting
+                venue_weight = 1.0  # Default weight
+                if use_venue_weighting:
+                    is_team_playing_home = match.get('home_team_id') == team_id
+                    
+                    if (is_home_team and is_team_playing_home) or (not is_home_team and not is_team_playing_home):
+                        venue_weight = 1.3  # 30% boost for relevant venue
+                        venue_weighting_applied = True
+                    else:
+                        venue_weight = 1.0  # Standard weight for less relevant venue
+                
+                # Combined weighting
+                combined_weight = time_weight * venue_weight
+                total_weight += combined_weight
+                
+                if match_total > line_value:
+                    over_count += 1
+                    weighted_over += combined_weight
+                    
+        except Exception as e:
+            # Fallback to equal weighting on error
+            venue_weighting_error = str(e)
+            logger.warning(f"Venue weighting failed for team {team_id}, falling back to equal weighting: {e}")
+            
+            weighted_over = 0.0
+            total_weight = 0.0
+            
+            for i, match in enumerate(matches):
+                home_corners = match.get('corners_home', 0) or 0
+                away_corners = match.get('corners_away', 0) or 0
+                match_total = home_corners + away_corners
+                
+                # Simple time weighting only
+                weight = np.exp(-0.05 * i)
+                total_weight += weight
+                
+                if match_total > line_value:
+                    weighted_over += weight
+        
+        # Calculate weighted percentage
+        if total_weight > 0:
+            weighted_rate = (weighted_over / total_weight) * 100
+        else:
+            weighted_rate = (over_count / total_count) * 100 if total_count > 0 else 50.0
+        
+        # Store weighting info for transparency (attach to result)
+        weighted_rate = float(weighted_rate)
+        if hasattr(weighted_rate, '__dict__'):
+            weighted_rate.venue_weighting_applied = venue_weighting_applied
+            weighted_rate.venue_weighting_error = venue_weighting_error
+        
+        return weighted_rate
+    
+    def _calculate_team_consistency_factor(self, home_analysis: TeamCornerAnalysis, 
+                                         away_analysis: TeamCornerAnalysis,
+                                         home_games: int, away_games: int) -> float:
+        """Calculate consistency factor using pure line consistency method."""
+        
+        # Get historical matches to calculate line consistency
+        home_matches = self.db_manager.get_team_matches(home_analysis.team_id, home_analysis.season, limit=20)
+        away_matches = self.db_manager.get_team_matches(away_analysis.team_id, away_analysis.season, limit=20)
+        
+        # Calculate line consistency for Over 5.5 (our primary line)
+        home_line_consistency = self._calculate_pure_line_consistency(home_matches, home_analysis.team_id, 5.5)
+        away_line_consistency = self._calculate_pure_line_consistency(away_matches, away_analysis.team_id, 5.5)
+        
+        # Average line consistency
+        avg_line_consistency = (home_line_consistency + away_line_consistency) / 2
+        
+        # Convert line consistency to factor (higher line consistency = higher confidence)
+        # Line consistency ranges from 0-100, we want factor range 0.8-1.0
+        consistency_factor = 0.8 + (avg_line_consistency / 100) * 0.2
+        
+        # Additional penalty for very small samples
+        if min(home_games, away_games) < 5:
+            consistency_factor *= 0.85  # Extra penalty for very limited data
+        
+        return consistency_factor
+    
+    def _calculate_pure_line_consistency(self, matches: List[Dict], team_id: int, line_value: float) -> float:
+        """Calculate pure line consistency - how often the team hits the betting line."""
+        if not matches:
+            return 50.0  # Default neutral consistency
+        
+        total_corners_list = []
+        for match in matches:
+            home_corners = match.get('corners_home', 0) or 0
+            away_corners = match.get('corners_away', 0) or 0
+            total_corners = home_corners + away_corners
+            total_corners_list.append(total_corners)
+        
+        if not total_corners_list:
+            return 50.0
+        
+        # Calculate how often total corners exceed the line
+        line_hits = sum(1 for total in total_corners_list if total > line_value)
+        line_consistency = (line_hits / len(total_corners_list)) * 100
+        
+        # Line consistency IS the line performance rate
+        # This is the pure line consistency method we want
+        return line_consistency
     
     def generate_prediction(self, home_team_id: int, away_team_id: int, 
-                          season: int) -> Optional[PredictionResult]:
+                          season: int, cutoff_date = None) -> Optional[PredictionResult]:
         """Generate comprehensive corner prediction for a match."""
         try:
-            # Perform consistency analysis
-            consistency_analysis = self.analyze_match_consistency(home_team_id, away_team_id, season)
+            # Perform consistency analysis (with cutoff date for backtesting)
+            consistency_analysis = self.analyze_match_consistency(home_team_id, away_team_id, season, cutoff_date)
             
             if not consistency_analysis:
                 logger.warning(f"Cannot generate prediction - insufficient data")
@@ -314,7 +492,8 @@ class ConsistencyAnalyzer:
                 prediction_quality=prediction_quality,
                 
                 consistency_analysis=consistency_analysis,
-                analysis_report=analysis_report
+                analysis_report=analysis_report,
+                calculation_details=consistency_analysis.calculation_details
             )
             
             logger.info(f"Prediction generated: {prediction.home_team_name} vs {prediction.away_team_name} - {prediction.predicted_total_corners:.1f} corners")
@@ -334,7 +513,7 @@ class ConsistencyAnalyzer:
         
         # Geometric mean for conservative confidence
         confidence = (np.prod(factors) ** (1/len(factors))) * 100
-        return min(95, max(5, confidence))
+        return max(5, confidence)
     
     def _classify_prediction_quality(self, statistical_confidence: float, 
                                    consistency_score: float) -> str:
@@ -390,18 +569,18 @@ class ConsistencyAnalyzer:
         return "\n".join(report_lines)
 
 # Convenience functions
-def analyze_match_consistency(home_team_id: int, away_team_id: int, season: int = None) -> Optional[ConsistencyAnalysis]:
+def analyze_match_consistency(home_team_id: int, away_team_id: int, season: int = None, cutoff_date = None) -> Optional[ConsistencyAnalysis]:
     """Analyze consistency for a match."""
     if season is None:
         season = datetime.now().year
     
     analyzer = ConsistencyAnalyzer()
-    return analyzer.analyze_match_consistency(home_team_id, away_team_id, season)
+    return analyzer.analyze_match_consistency(home_team_id, away_team_id, season, cutoff_date)
 
-def predict_match_corners(home_team_id: int, away_team_id: int, season: int = None) -> Optional[PredictionResult]:
+def predict_match_corners(home_team_id: int, away_team_id: int, season: int = None, cutoff_date = None) -> Optional[PredictionResult]:
     """Generate corner prediction for a match."""
     if season is None:
         season = datetime.now().year
     
     analyzer = ConsistencyAnalyzer()
-    return analyzer.generate_prediction(home_team_id, away_team_id, season)
+    return analyzer.generate_prediction(home_team_id, away_team_id, season, cutoff_date)

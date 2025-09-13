@@ -81,6 +81,8 @@ class DatabaseManager:
                 corners_home INTEGER,
                 corners_away INTEGER,
                 total_corners INTEGER GENERATED ALWAYS AS (corners_home + corners_away) STORED,
+                goals_home INTEGER,
+                goals_away INTEGER,
                 season INTEGER NOT NULL,
                 status TEXT NOT NULL,
                 referee TEXT,
@@ -91,6 +93,35 @@ class DatabaseManager:
                 FOREIGN KEY (away_team_id) REFERENCES teams (id)
             )
         """)
+        
+        # Add goal columns to existing matches table if they don't exist
+        try:
+            conn.execute("ALTER TABLE matches ADD COLUMN goals_home INTEGER")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        
+        try:
+            conn.execute("ALTER TABLE matches ADD COLUMN goals_away INTEGER")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        
+        # Add unique constraint on predictions.match_id to prevent duplicates
+        try:
+            # First check if the constraint already exists
+            cursor = conn.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='index' AND name='idx_predictions_match_unique'
+            """)
+            if not cursor.fetchone():
+                conn.execute("""
+                    CREATE UNIQUE INDEX idx_predictions_match_unique 
+                    ON predictions (match_id)
+                """)
+                logger.info("Added unique constraint to prevent duplicate predictions per match")
+        except sqlite3.OperationalError as e:
+            # Constraint might already exist or there might be existing duplicates
+            logger.warning(f"Could not add unique constraint: {e}")
+            logger.info("This is expected if duplicate predictions already exist")
         
         # Predictions table
         conn.execute("""
@@ -104,12 +135,25 @@ class DatabaseManager:
                 away_team_expected REAL NOT NULL,
                 home_team_consistency REAL,
                 away_team_consistency REAL,
+                home_team_score_probability REAL,
+                away_team_score_probability REAL,
                 analysis_report TEXT,
                 season INTEGER NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (match_id) REFERENCES matches (id)
             )
         """)
+        
+        # Add goal scoring probability columns if they don't exist
+        try:
+            conn.execute("ALTER TABLE predictions ADD COLUMN home_team_score_probability REAL")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        
+        try:
+            conn.execute("ALTER TABLE predictions ADD COLUMN away_team_score_probability REAL")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
         
         # Prediction Results table (Accuracy Tracking)
         conn.execute("""
@@ -164,6 +208,38 @@ class DatabaseManager:
                 FOREIGN KEY (prediction_id) REFERENCES predictions (id)
             )
         """)
+
+        # Date-Based Backtesting table (clean and simple)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS date_based_backtests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                api_fixture_id INTEGER NOT NULL,
+                prediction_date DATE NOT NULL,
+                match_date DATE NOT NULL,
+                home_team_id INTEGER,
+                away_team_id INTEGER,
+                home_team_name TEXT NOT NULL,
+                away_team_name TEXT NOT NULL,
+                predicted_total_corners REAL NOT NULL,
+                confidence_5_5 REAL NOT NULL,
+                confidence_6_5 REAL NOT NULL,
+                predicted_home_corners REAL NOT NULL,
+                predicted_away_corners REAL NOT NULL,
+                home_score_probability REAL,
+                away_score_probability REAL,
+                home_2plus_probability REAL,
+                away_2plus_probability REAL,
+                actual_total_corners INTEGER,
+                over_5_5_correct BOOLEAN,
+                over_6_5_correct BOOLEAN,
+                prediction_accuracy REAL,
+                analysis_report TEXT,
+                run_id TEXT NOT NULL,
+                season INTEGER NOT NULL DEFAULT 2025,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         
         # Create indexes for better performance
         indexes = [
@@ -189,25 +265,65 @@ class DatabaseManager:
     def insert_team(self, team_data: Dict) -> int:
         """Insert a new team or update existing one."""
         with self.get_connection() as conn:
+            # First, check if team already exists for this season
             cursor = conn.execute("""
-                INSERT OR REPLACE INTO teams (
-                    api_team_id, name, code, country, logo_url, founded,
-                    venue_name, venue_capacity, venue_city, season, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            """, (
-                team_data['api_team_id'],
-                team_data['name'],
-                team_data.get('code'),
-                team_data.get('country', 'China'),
-                team_data.get('logo_url'),
-                team_data.get('founded'),
-                team_data.get('venue_name'),
-                team_data.get('venue_capacity'),
-                team_data.get('venue_city'),
-                team_data['season']
-            ))
-            conn.commit()
-            return cursor.lastrowid
+                SELECT id FROM teams WHERE api_team_id = ? AND season = ?
+            """, (team_data['api_team_id'], team_data['season']))
+            
+            existing_team = cursor.fetchone()
+            
+            if existing_team:
+                # Update existing team
+                cursor = conn.execute("""
+                    UPDATE teams SET 
+                        name = ?, code = ?, country = ?, logo_url = ?, founded = ?,
+                        venue_name = ?, venue_capacity = ?, venue_city = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE api_team_id = ? AND season = ?
+                """, (
+                    team_data['name'],
+                    team_data.get('code'),
+                    team_data.get('country', 'China'),
+                    team_data.get('logo_url'),
+                    team_data.get('founded'),
+                    team_data.get('venue_name'),
+                    team_data.get('venue_capacity'),
+                    team_data.get('venue_city'),
+                    team_data['api_team_id'],
+                    team_data['season']
+                ))
+                conn.commit()
+                return existing_team[0]
+            else:
+                # Insert new team
+                cursor = conn.execute("""
+                    INSERT INTO teams (
+                        api_team_id, name, code, country, logo_url, founded,
+                        venue_name, venue_capacity, venue_city, season, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (
+                    team_data['api_team_id'],
+                    team_data['name'],
+                    team_data.get('code'),
+                    team_data.get('country', 'China'),
+                    team_data.get('logo_url'),
+                    team_data.get('founded'),
+                    team_data.get('venue_name'),
+                    team_data.get('venue_capacity'),
+                    team_data.get('venue_city'),
+                    team_data['season']
+                ))
+                conn.commit()
+                return cursor.lastrowid
+    
+    def get_team_by_id(self, team_id: int) -> Optional[Dict]:
+        """Get team by database ID."""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM teams WHERE id = ?",
+                (team_id,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
     
     def get_team_by_api_id(self, api_team_id: int, season: int = None) -> Optional[Dict]:
         """Get team by API ID."""
@@ -294,8 +410,40 @@ class DatabaseManager:
             cursor = conn.execute(sql, params)
             return [dict(row) for row in cursor.fetchall()]
     
+    def get_team_matches_before_date(self, team_id: int, season: int, cutoff_date, limit: int = None) -> List[Dict]:
+        """Get matches for a team in a season BEFORE a specific cutoff date (for time-travel predictions)."""
+        from datetime import date
+        
+        # Convert cutoff_date to date object if it's a string
+        if isinstance(cutoff_date, str):
+            from datetime import datetime
+            cutoff_date = datetime.strptime(cutoff_date, '%Y-%m-%d').date()
+        
+        with self.get_connection() as conn:
+            sql = """
+                SELECT m.*, ht.name as home_team_name, at.name as away_team_name
+                FROM matches m
+                JOIN teams ht ON m.home_team_id = ht.id
+                JOIN teams at ON m.away_team_id = at.id
+                WHERE (m.home_team_id = ? OR m.away_team_id = ?) 
+                AND m.season = ? AND m.status = 'FT'
+                AND date(m.match_date) < ?
+                ORDER BY m.match_date DESC
+            """
+            params = [team_id, team_id, season, cutoff_date]
+            
+            if limit:
+                sql += " LIMIT ?"
+                params.append(limit)
+            
+            cursor = conn.execute(sql, params)
+            matches = [dict(row) for row in cursor.fetchall()]
+            
+            logger.debug(f"Retrieved {len(matches)} matches for team {team_id} before {cutoff_date}")
+            return matches
+    
     def get_completed_matches(self, season: int, limit: int = None) -> List[Dict]:
-        """Get completed matches for a season."""
+        """Get completed matches for a season (with corner data)."""
         with self.get_connection() as conn:
             sql = """
                 SELECT m.*, ht.name as home_team_name, at.name as away_team_name
@@ -314,30 +462,144 @@ class DatabaseManager:
             cursor = conn.execute(sql, params)
             return [dict(row) for row in cursor.fetchall()]
     
-    # PREDICTIONS OPERATIONS
-    def insert_prediction(self, prediction_data: Dict) -> int:
-        """Insert a new prediction."""
+    def get_matches_needing_corner_stats(self, season: int, limit: int = None) -> List[Dict]:
+        """Get completed matches that need corner statistics imported."""
+        with self.get_connection() as conn:
+            sql = """
+                SELECT m.*, ht.name as home_team_name, at.name as away_team_name
+                FROM matches m
+                JOIN teams ht ON m.home_team_id = ht.id
+                JOIN teams at ON m.away_team_id = at.id
+                WHERE m.season = ? AND m.status = 'FT' AND m.corners_home IS NULL
+                ORDER BY m.match_date DESC
+            """
+            params = [season]
+            
+            if limit:
+                sql += " LIMIT ?"
+                params.append(limit)
+            
+            cursor = conn.execute(sql, params)
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def update_match_corners(self, match_id: int, home_corners: int, away_corners: int) -> bool:
+        """Update match with corner statistics."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.execute("""
+                    UPDATE matches 
+                    SET corners_home = ?, corners_away = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (home_corners, away_corners, match_id))
+                
+                conn.commit()
+                return cursor.rowcount > 0
+                
+        except Exception as e:
+            logger.error(f"Failed to update match {match_id} corners: {e}")
+            return False
+    
+    def update_match_goals(self, match_id: int, home_goals: int, away_goals: int) -> bool:
+        """Update match with goal statistics."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.execute("""
+                    UPDATE matches 
+                    SET goals_home = ?, goals_away = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (home_goals, away_goals, match_id))
+                
+                conn.commit()
+                return cursor.rowcount > 0
+                
+        except Exception as e:
+            logger.error(f"Failed to update match {match_id} goals: {e}")
+            return False
+    
+    def get_matches_needing_goal_stats(self, season: int, limit: int = 100) -> List[Tuple]:
+        """Get matches that need goal statistics imported."""
         with self.get_connection() as conn:
             cursor = conn.execute("""
-                INSERT INTO predictions (
-                    match_id, predicted_total_corners, confidence_5_5, confidence_6_5,
-                    home_team_expected, away_team_expected, home_team_consistency,
-                    away_team_consistency, analysis_report, season
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                prediction_data['match_id'],
-                prediction_data['predicted_total_corners'],
-                prediction_data['confidence_5_5'],
-                prediction_data['confidence_6_5'],
-                prediction_data['home_team_expected'],
-                prediction_data['away_team_expected'],
-                prediction_data.get('home_team_consistency'),
-                prediction_data.get('away_team_consistency'),
-                prediction_data.get('analysis_report'),
-                prediction_data['season']
-            ))
-            conn.commit()
-            return cursor.lastrowid
+                SELECT m.api_fixture_id, m.id, ht.name as home_team, at.name as away_team, m.match_date
+                FROM matches m
+                JOIN teams ht ON m.home_team_id = ht.id  
+                JOIN teams at ON m.away_team_id = at.id
+                WHERE m.season = ? AND m.goals_home IS NULL AND m.status = 'FT'
+                ORDER BY m.match_date DESC
+                LIMIT ?
+            """, (season, limit))
+            return cursor.fetchall()
+    
+    # PREDICTIONS OPERATIONS
+    def insert_prediction(self, prediction_data: Dict) -> int:
+        """Insert a new prediction or replace existing one for the same match."""
+        with self.get_connection() as conn:
+            # First check if a prediction already exists for this match
+            cursor = conn.execute("""
+                SELECT id FROM predictions WHERE match_id = ?
+            """, (prediction_data['match_id'],))
+            existing = cursor.fetchone()
+            
+            if existing:
+                # Update existing prediction
+                cursor = conn.execute("""
+                    UPDATE predictions SET
+                        predicted_total_corners = ?,
+                        confidence_5_5 = ?,
+                        confidence_6_5 = ?,
+                        home_team_expected = ?,
+                        away_team_expected = ?,
+                        home_team_consistency = ?,
+                        away_team_consistency = ?,
+                        home_team_score_probability = ?,
+                        away_team_score_probability = ?,
+                        analysis_report = ?,
+                        season = ?,
+                        created_at = CURRENT_TIMESTAMP
+                    WHERE match_id = ?
+                """, (
+                    prediction_data['predicted_total_corners'],
+                    prediction_data['confidence_5_5'],
+                    prediction_data['confidence_6_5'],
+                    prediction_data['home_team_expected'],
+                    prediction_data['away_team_expected'],
+                    prediction_data.get('home_team_consistency'),
+                    prediction_data.get('away_team_consistency'),
+                    prediction_data.get('home_team_score_probability'),
+                    prediction_data.get('away_team_score_probability'),
+                    prediction_data.get('analysis_report'),
+                    prediction_data['season'],
+                    prediction_data['match_id']
+                ))
+                conn.commit()
+                logger.info(f"Updated existing prediction for match {prediction_data['match_id']}")
+                return existing[0]
+            else:
+                # Insert new prediction
+                cursor = conn.execute("""
+                    INSERT INTO predictions (
+                        match_id, predicted_total_corners, confidence_5_5, confidence_6_5,
+                        home_team_expected, away_team_expected, home_team_consistency,
+                        away_team_consistency, home_team_score_probability, away_team_score_probability,
+                        analysis_report, season
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    prediction_data['match_id'],
+                    prediction_data['predicted_total_corners'],
+                    prediction_data['confidence_5_5'],
+                    prediction_data['confidence_6_5'],
+                    prediction_data['home_team_expected'],
+                    prediction_data['away_team_expected'],
+                    prediction_data.get('home_team_consistency'),
+                    prediction_data.get('away_team_consistency'),
+                    prediction_data.get('home_team_score_probability'),
+                    prediction_data.get('away_team_score_probability'),
+                    prediction_data.get('analysis_report'),
+                    prediction_data['season']
+                ))
+                conn.commit()
+                logger.info(f"Inserted new prediction for match {prediction_data['match_id']}")
+                return cursor.lastrowid
     
     def get_predictions_by_season(self, season: int) -> List[Dict]:
         """Get all predictions for a season."""

@@ -10,50 +10,13 @@ import numpy as np
 from data.database import get_db_manager
 from data.consistency_analyzer import ConsistencyAnalyzer, PredictionResult, predict_match_corners
 from data.team_analyzer import analyze_team
+from data.head_to_head_analyzer import HeadToHeadAnalyzer, analyze_head_to_head
+from data.prediction_storage import PredictionStorageManager
+from data.prediction_models import MatchPrediction, MatchInfo, PredictionData, LinePredictions, GoalPredictions, QualityMetrics, TeamAnalysis, AnalysisData
+from data.goal_analyzer import GoalAnalyzer
 from config import Config
 
 logger = logging.getLogger(__name__)
-
-@dataclass
-class MatchPrediction:
-    """Complete match prediction with all analysis."""
-    # Match identification
-    home_team_id: int
-    away_team_id: int
-    home_team_name: str
-    away_team_name: str
-    season: int
-    
-    # Core predictions
-    predicted_total_corners: float
-    predicted_home_corners: float
-    predicted_away_corners: float
-    
-    # Line predictions with confidence
-    over_5_5_prediction: bool
-    over_5_5_confidence: float
-    over_6_5_prediction: bool
-    over_6_5_confidence: float
-    over_7_5_prediction: bool
-    over_7_5_confidence: float
-    
-    # Expected value and range
-    expected_total_range: Tuple[float, float]  # (min, max)
-    most_likely_outcome: str
-    
-    # Quality metrics
-    prediction_quality: str
-    statistical_confidence: float
-    data_reliability: str
-    
-    # Supporting analysis
-    consistency_score: float
-    home_team_form: str
-    away_team_form: str
-    
-    # Detailed report
-    analysis_summary: str
-    recommendation: str
 
 class PredictionEngine:
     """Advanced prediction engine for corner betting."""
@@ -61,11 +24,14 @@ class PredictionEngine:
     def __init__(self):
         self.db_manager = get_db_manager()
         self.consistency_analyzer = ConsistencyAnalyzer()
+        self.h2h_analyzer = HeadToHeadAnalyzer()
+        self.storage_manager = PredictionStorageManager()
+        self.goal_analyzer = GoalAnalyzer()
         
         logger.info("Prediction Engine initialized")
     
     def predict_match(self, home_team_id: int, away_team_id: int, 
-                     season: int = None) -> Optional[MatchPrediction]:
+                     season: int = None, skip_storage: bool = False) -> Optional[MatchPrediction]:
         """Generate comprehensive match prediction."""
         try:
             if season is None:
@@ -79,6 +45,13 @@ class PredictionEngine:
             if not prediction_result:
                 logger.warning("Could not generate prediction - insufficient data")
                 return None
+            
+            # Analyze head-to-head data
+            h2h_analysis = self.h2h_analyzer.analyze_head_to_head(home_team_id, away_team_id, season)
+            
+            # Apply head-to-head adjustments if available
+            if h2h_analysis and h2h_analysis.h2h_reliability != 'Insufficient':
+                prediction_result = self._apply_h2h_adjustments(prediction_result, h2h_analysis)
             
             # Get team names
             home_team = self._get_team_info(home_team_id, season)
@@ -105,40 +78,83 @@ class PredictionEngine:
             recommendation = self._generate_recommendation(prediction_result, line_predictions)
             
             # Assess data reliability
-            data_reliability = self._assess_data_reliability(prediction_result)
+            data_reliability = self._assess_data_reliability(home_team_id, away_team_id, season)
+            
+            # Generate goals predictions (BTTS) - both 1+ and 2+ goals
+            try:
+                logger.info(f"Generating BTTS predictions (1+ and 2+ goals) for teams {home_team_id} vs {away_team_id}")
+                
+                # Generate 1+ goals BTTS prediction
+                btts_prediction = self.goal_analyzer.predict_btts(home_team_id, away_team_id, season)
+                
+                # Generate 2+ goals BTTS prediction
+                btts_2plus_prediction = self.goal_analyzer.predict_btts_2plus(home_team_id, away_team_id, season)
+                
+                if btts_prediction:
+                    # Create enhanced goal predictions with both 1+ and 2+ goals data
+                    goal_predictions = GoalPredictions(
+                        btts=btts_prediction,
+                        btts_2plus=btts_2plus_prediction if btts_2plus_prediction else None
+                    )
+                    logger.info(f"BTTS predictions completed - 1+: {btts_prediction.get('btts_probability', 'N/A')}%, 2+: {btts_2plus_prediction.get('btts_2plus_probability', 'N/A') if btts_2plus_prediction else 'N/A'}%")
+                else:
+                    goal_predictions = None
+                    logger.warning("BTTS prediction failed - no 1+ goals data available")
+                    
+            except Exception as e:
+                logger.warning(f"Failed to generate BTTS predictions: {e}")
+                goal_predictions = None
             
             match_prediction = MatchPrediction(
-                home_team_id=home_team_id,
-                away_team_id=away_team_id,
-                home_team_name=home_team['name'],
-                away_team_name=away_team['name'],
-                season=season,
-                
-                predicted_total_corners=prediction_result.predicted_total_corners,
-                predicted_home_corners=prediction_result.predicted_home_corners,
-                predicted_away_corners=prediction_result.predicted_away_corners,
-                
-                over_5_5_prediction=line_predictions['over_5_5']['prediction'],
-                over_5_5_confidence=line_predictions['over_5_5']['confidence'],
-                over_6_5_prediction=line_predictions['over_6_5']['prediction'],
-                over_6_5_confidence=line_predictions['over_6_5']['confidence'],
-                over_7_5_prediction=line_predictions['over_7_5']['prediction'],
-                over_7_5_confidence=line_predictions['over_7_5']['confidence'],
-                
-                expected_total_range=expected_range,
-                most_likely_outcome=most_likely_outcome,
-                
-                prediction_quality=prediction_result.prediction_quality,
-                statistical_confidence=prediction_result.statistical_confidence,
-                data_reliability=data_reliability,
-                
-                consistency_score=prediction_result.consistency_analysis.match_consistency_score,
-                home_team_form=home_form,
-                away_team_form=away_form,
-                
-                analysis_summary=analysis_summary,
-                recommendation=recommendation
+                match_info=MatchInfo(
+                    home_team=home_team['name'],
+                    away_team=away_team['name'],
+                    home_team_id=home_team_id,
+                    away_team_id=away_team_id,
+                    season=season,
+                    prediction_date=datetime.now().isoformat()
+                ),
+                predictions=PredictionData(
+                    predicted_total_corners=prediction_result.predicted_total_corners,
+                    predicted_home_corners=prediction_result.predicted_home_corners,
+                    predicted_away_corners=prediction_result.predicted_away_corners,
+                    expected_total_range=expected_range,
+                    most_likely_outcome=most_likely_outcome
+                ),
+                line_predictions=LinePredictions(
+                    over_5_5_prediction="OVER" if line_predictions['over_5_5']['prediction'] else "UNDER",
+                    over_5_5_confidence=line_predictions['over_5_5']['confidence'],
+                    over_6_5_prediction="OVER" if line_predictions['over_6_5']['prediction'] else "UNDER",
+                    over_6_5_confidence=line_predictions['over_6_5']['confidence'],
+                    over_7_5_prediction="OVER" if line_predictions['over_7_5']['prediction'] else "UNDER",
+                    over_7_5_confidence=line_predictions['over_7_5']['confidence']
+                ),
+                goal_predictions=goal_predictions,
+                quality_metrics=QualityMetrics(
+                    prediction_quality=prediction_result.prediction_quality,
+                    statistical_confidence=prediction_result.statistical_confidence,
+                    data_reliability=data_reliability,
+                    consistency_score=prediction_result.consistency_analysis.match_consistency_score
+                ),
+                team_analysis=TeamAnalysis(
+                    home_team_form=home_form,
+                    away_team_form=away_form
+                ),
+                analysis=AnalysisData(
+                    analysis_summary=analysis_summary,
+                    recommendation=recommendation
+                )
             )
+            
+            # Store prediction for future verification (unless skipped for backtesting)
+            if not skip_storage:
+                try:
+                    stored_prediction_id = self.storage_manager.store_prediction(match_prediction)
+                    logger.info(f"Stored prediction with ID: {stored_prediction_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to store prediction: {e}")
+            else:
+                logger.debug("Skipping prediction storage (backtesting mode)")
             
             logger.info(f"Prediction completed: {match_prediction.predicted_total_corners:.1f} total corners")
             return match_prediction
@@ -294,22 +310,30 @@ class PredictionEngine:
         else:
             return f"No strong betting opportunities identified | {quality_note}"
     
-    def _assess_data_reliability(self, prediction: PredictionResult) -> str:
-        """Assess data reliability for the prediction."""
-        analysis = prediction.consistency_analysis
-        
-        # Check team data quality
-        home_difficulty = analysis.home_prediction_difficulty
-        away_difficulty = analysis.away_prediction_difficulty
-        
-        if home_difficulty == "Easy" and away_difficulty == "Easy":
-            return "High"
-        elif home_difficulty in ["Easy", "Moderate"] and away_difficulty in ["Easy", "Moderate"]:
-            return "Good"
-        elif "Difficult" in [home_difficulty, away_difficulty]:
+    def _assess_data_reliability(self, home_team_id: int, away_team_id: int, season: int) -> str:
+        """Assess data reliability based on sample size (number of games)."""
+        try:
+            # Get game counts directly from database
+            home_matches = self.db_manager.get_team_matches(home_team_id, season, limit=20)
+            away_matches = self.db_manager.get_team_matches(away_team_id, season, limit=20)
+            
+            home_games = len(home_matches) if home_matches else 0
+            away_games = len(away_matches) if away_matches else 0
+            min_games = min(home_games, away_games)
+            
+            # Use game-based data quality standards
+            if min_games >= 15:
+                return "Excellent"
+            elif min_games >= 11:
+                return "Good" 
+            elif min_games >= 7:
+                return "Fair"
+            else:
+                return "Poor"
+                
+        except Exception as e:
+            # Fallback to conservative assessment
             return "Fair"
-        else:
-            return "Poor"
     
     def predict_multiple_matches(self, match_list: List[Tuple[int, int]], 
                                season: int = None) -> List[Optional[MatchPrediction]]:
@@ -356,6 +380,46 @@ class PredictionEngine:
         # Sort by confidence descending
         opportunities.sort(key=lambda x: x['confidence'], reverse=True)
         return opportunities
+    
+    def _apply_h2h_adjustments(self, prediction_result: PredictionResult, 
+                             h2h_analysis) -> PredictionResult:
+        """Apply head-to-head adjustments to prediction."""
+        try:
+            # Adjust total corners prediction
+            adjusted_total = self.h2h_analyzer.get_h2h_prediction_adjustment(
+                h2h_analysis, prediction_result.predicted_total_corners
+            )
+            
+            # Get confidence boost
+            confidence_boost = self.h2h_analyzer.get_h2h_confidence_boost(h2h_analysis)
+            
+            # Create adjusted prediction result
+            # Note: This is a simplified adjustment - you might want to create a new PredictionResult
+            prediction_result.predicted_total_corners = adjusted_total
+            prediction_result.confidence_5_5 = prediction_result.confidence_5_5 + confidence_boost
+            prediction_result.confidence_6_5 = prediction_result.confidence_6_5 + confidence_boost
+            prediction_result.confidence_7_5 = prediction_result.confidence_7_5 + confidence_boost
+            
+            # Update analysis report to include h2h information
+            h2h_info = (
+                f"\n\nHEAD-TO-HEAD ANALYSIS:\n"
+                f"- Historical meetings: {h2h_analysis.total_meetings}\n"
+                f"- Average total corners in h2h: {h2h_analysis.avg_total_corners:.1f}\n"
+                f"- H2H consistency: {h2h_analysis.h2h_consistency:.1f}%\n"
+                f"- H2H reliability: {h2h_analysis.h2h_reliability}\n"
+                f"- Home advantage factor: {h2h_analysis.home_advantage_factor:.2f}\n"
+                f"- Prediction adjusted by: {abs(adjusted_total - prediction_result.predicted_total_corners):.1f} corners\n"
+                f"- Confidence boost applied: +{confidence_boost:.1f}%"
+            )
+            
+            prediction_result.analysis_report += h2h_info
+            
+            logger.info(f"Applied h2h adjustments: {prediction_result.predicted_total_corners:.1f} corners, +{confidence_boost:.1f}% confidence")
+            return prediction_result
+            
+        except Exception as e:
+            logger.error(f"Failed to apply h2h adjustments: {e}")
+            return prediction_result
 
 # Convenience functions
 def predict_match_comprehensive(home_team_id: int, away_team_id: int, 

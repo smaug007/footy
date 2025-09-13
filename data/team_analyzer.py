@@ -62,7 +62,7 @@ class TeamCornerAnalyzer:
         
         logger.info("Team Corner Analyzer initialized")
     
-    def analyze_team_corners(self, team_id: int, season: int, limit_games: int = None) -> Optional[TeamCornerAnalysis]:
+    def analyze_team_corners(self, team_id: int, season: int, limit_games: int = None, cutoff_date = None) -> Optional[TeamCornerAnalysis]:
         """Perform comprehensive corner analysis for a team."""
         try:
             # Get team info
@@ -78,8 +78,12 @@ class TeamCornerAnalyzer:
                 logger.warning(f"Team {team_id} not found for season {season}")
                 return None
             
-            # Get team matches with corner data
-            team_matches = self._get_team_matches_with_corners(team['id'], season, limit_games)
+            # Get team matches with corner data (with cutoff date for backtesting)
+            if cutoff_date:
+                team_matches = self._get_team_matches_with_corners_before_date(team['id'], season, cutoff_date, limit_games)
+                logger.info(f"🕐 Using cutoff date {cutoff_date} for {team['name']} corner analysis")
+            else:
+                team_matches = self._get_team_matches_with_corners(team['id'], season, limit_games)
             
             if len(team_matches) < self.min_games:
                 logger.warning(f"Insufficient data for team {team['name']}: {len(team_matches)} matches (need {self.min_games})")
@@ -157,6 +161,34 @@ class TeamCornerAnalyzer:
             """, (team_id, team_id, season, limit))
             
             return [dict(row) for row in cursor.fetchall()]
+    
+    def _get_team_matches_with_corners_before_date(self, team_id: int, season: int, cutoff_date, limit: int = None) -> List[Dict]:
+        """Get team matches that have corner data BEFORE a specific cutoff date (for time-travel predictions)."""
+        from datetime import date
+        limit = limit or self.max_games
+        
+        # Convert cutoff_date to date object if it's a string
+        if isinstance(cutoff_date, str):
+            from datetime import datetime
+            cutoff_date = datetime.strptime(cutoff_date, '%Y-%m-%d').date()
+        
+        with self.db_manager.get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT m.*, ht.name as home_team_name, at.name as away_team_name
+                FROM matches m
+                JOIN teams ht ON m.home_team_id = ht.id
+                JOIN teams at ON m.away_team_id = at.id
+                WHERE (m.home_team_id = ? OR m.away_team_id = ?) 
+                AND m.season = ? AND m.status = 'FT'
+                AND m.corners_home IS NOT NULL AND m.corners_away IS NOT NULL
+                AND date(m.match_date) < ?
+                ORDER BY m.match_date DESC
+                LIMIT ?
+            """, (team_id, team_id, season, cutoff_date, limit))
+            
+            matches = [dict(row) for row in cursor.fetchall()]
+            logger.debug(f"Retrieved {len(matches)} corner matches for team {team_id} before {cutoff_date}")
+            return matches
     
     def _extract_corner_data(self, matches: List[Dict], team_id: int) -> Tuple[List[int], List[int]]:
         """Extract corners won and conceded from matches."""
@@ -424,13 +456,13 @@ class TeamCornerAnalyzer:
             raise
 
 # Convenience functions
-def analyze_team(team_id: int, season: int = None) -> Optional[TeamCornerAnalysis]:
+def analyze_team(team_id: int, season: int = None, cutoff_date = None) -> Optional[TeamCornerAnalysis]:
     """Analyze a single team's corner statistics."""
     if season is None:
         season = datetime.now().year
     
     analyzer = TeamCornerAnalyzer()
-    return analyzer.analyze_team_corners(team_id, season)
+    return analyzer.analyze_team_corners(team_id, season, cutoff_date=cutoff_date)
 
 def compare_teams(team1_id: int, team2_id: int, season: int = None) -> Dict[str, Any]:
     """Compare two teams' corner statistics."""

@@ -1,0 +1,613 @@
+{% extends "base.html" %}
+
+{% block title %}Date-Based Backtesting - Historical Analysis{% endblock %}
+
+{% block content %}
+
+<!-- Page Header -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <h1 class="mb-0">
+                    <i class="fas fa-calendar-alt text-primary"></i> Date-Based Backtesting
+                </h1>
+                <p class="text-muted mb-0">Historical prediction analysis using same logic as main prediction system</p>
+            </div>
+            <div>
+                <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">
+                    <i class="fas fa-arrow-left"></i> Back to Predictions
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Season Filter -->
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="row align-items-center">
+            <div class="col-md-8">
+                <h6 class="mb-0"><i class="fas fa-filter text-primary"></i> Season Filter</h6>
+                <small class="text-muted">Choose which season to analyze for backtesting</small>
+            </div>
+            <div class="col-md-4">
+                <select class="form-select" id="seasonFilter" onchange="changeSeason()">
+                    <option value="2024" {% if current_season == 2024 %}selected{% endif %}>2024 (Completed Season)</option>
+                    <option value="2025" {% if current_season == 2025 %}selected{% endif %}>2025 (Current Season)</option>
+                </select>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if error %}
+<!-- Error Message -->
+<div class="alert alert-danger">
+    <i class="fas fa-exclamation-triangle"></i> {{ error }}
+</div>
+{% else %}
+
+<!-- Summary Statistics -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card bg-primary text-white">
+            <div class="card-body text-center">
+                <i class="fas fa-list fa-2x mb-2"></i>
+                <h3 class="mb-0">{{ summary.total_predictions or 0 }}</h3>
+                <small>Total Backtests ({{ current_season }})</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-success text-white">
+            <div class="card-body text-center">
+                <i class="fas fa-percentage fa-2x mb-2"></i>
+                <h3 class="mb-0">{{ "%.1f"|format(summary.average_accuracy or 0) }}%</h3>
+                <small>Average Accuracy</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-info text-white">
+            <div class="card-body text-center">
+                <i class="fas fa-bullseye fa-2x mb-2"></i>
+                <h3 class="mb-0">{{ "%.1f"|format(summary.over_5_5_success_rate or 0) }}%</h3>
+                <small>Over 5.5 Success</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-warning text-white">
+            <div class="card-body text-center">
+                <i class="fas fa-target fa-2x mb-2"></i>
+                <h3 class="mb-0">{{ "%.1f"|format(summary.over_6_5_success_rate or 0) }}%</h3>
+                <small>Over 6.5 Success</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Date Selection -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">
+            <i class="fas fa-calendar-check"></i> Run Backtest for Specific Date
+        </h5>
+    </div>
+    <div class="card-body">
+        <div class="row align-items-end">
+            <div class="col-md-4">
+                <label for="backtestDate" class="form-label">Select Date</label>
+                <input type="date" class="form-control" id="backtestDate" min="2025-02-22" max="2025-08-16">
+                <small class="form-text text-muted">Choose a date with matches to analyze</small>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Available Dates</label>
+                <select class="form-select" id="availableDates" onchange="selectAvailableDate()">
+                    <option value="">Choose from available dates...</option>
+                    {% for date in available_dates %}
+                    <option value="{{ date.isoformat() }}">{{ date.strftime('%Y-%m-%d (%A)') }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <button class="btn btn-primary w-100" onclick="runDateBacktest()" id="runBacktestBtn">
+                    <i class="fas fa-play"></i> Run Backtest for Date
+                </button>
+            </div>
+        </div>
+        <div class="mt-3">
+            <div class="alert alert-info">
+                <i class="fas fa-info-circle"></i>
+                <strong>How it works:</strong> Select a date → System finds matches played that day → Uses only historical data from before that date → Generates predictions → Compares with actual results
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Batch Processing -->
+<div class="card mb-4">
+    <div class="card-header bg-gradient-success text-white">
+        <h5 class="mb-0">
+            <i class="fas fa-rocket"></i> Batch Backtesting - Process All Dates
+        </h5>
+    </div>
+    <div class="card-body">
+        <div class="row align-items-center">
+            <div class="col-md-8">
+                <h6 class="text-success"><i class="fas fa-bolt"></i> Automated Processing</h6>
+                <p class="mb-2">Process all {{ available_dates|length }} available dates automatically with proper time-travel filtering.</p>
+                <div class="row">
+                    <div class="col-md-6">
+                        <label for="maxDates" class="form-label">Limit Processing (Optional)</label>
+                        <input type="number" class="form-control" id="maxDates" placeholder="All dates" min="1" max="{{ available_dates|length }}">
+                        <small class="form-text text-muted">Leave empty to process all dates</small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Season</label>
+                        <select class="form-select" id="batchSeason">
+                            <option value="2024" {% if current_season == 2024 %}selected{% endif %}>2024 (Completed Season)</option>
+                            <option value="2025" {% if current_season == 2025 %}selected{% endif %}>2025 (Current Season)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 text-center">
+                <button class="btn btn-success btn-lg w-100" onclick="runBatchBacktest()" id="runBatchBtn">
+                    <i class="fas fa-rocket"></i> Run Batch Backtest
+                </button>
+                <small class="text-muted d-block mt-2">
+                    <i class="fas fa-clock"></i> Est. time: 2-5 minutes
+                </small>
+            </div>
+        </div>
+        
+        <!-- Batch Progress -->
+        <div class="mt-3" id="batchProgressCard" style="display: none;">
+            <div class="progress mb-2" style="height: 25px;">
+                <div class="progress-bar progress-bar-striped progress-bar-animated bg-success" 
+                     id="batchProgressBar" role="progressbar" style="width: 0%;">
+                    <span id="batchProgressText">Starting...</span>
+                </div>
+            </div>
+            <div class="row text-center">
+                <div class="col-md-3">
+                    <small class="text-muted">Processed</small>
+                    <div><span id="processedCount">0</span></div>
+                </div>
+                <div class="col-md-3">
+                    <small class="text-muted">Successful</small>
+                    <div><span id="successCount">0</span></div>
+                </div>
+                <div class="col-md-3">
+                    <small class="text-muted">Total Predictions</small>
+                    <div><span id="predictionCount">0</span></div>
+                </div>
+                <div class="col-md-3">
+                    <small class="text-muted">Success Rate</small>
+                    <div><span id="successRate">0%</span></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="mt-3">
+            <div class="alert alert-warning">
+                <i class="fas fa-exclamation-triangle"></i>
+                <strong>Note:</strong> Batch processing will skip dates that already have backtest results. This ensures no duplicate processing and makes reruns safe.
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Progress Bar -->
+<div class="card mb-4" id="progressCard" style="display: none;">
+    <div class="card-body">
+        <h6 id="progressTitle">Processing Date-Based Backtest...</h6>
+        <div class="progress">
+            <div class="progress-bar progress-bar-striped progress-bar-animated" id="progressBar" 
+                 role="progressbar" style="width: 0%"></div>
+        </div>
+        <div class="mt-2" id="progressText">Initializing...</div>
+    </div>
+</div>
+
+<!-- Backtest Results -->
+{% if existing_results %}
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">
+            <i class="fas fa-table"></i> Backtest Results
+        </h5>
+        <span class="badge bg-primary">{{ existing_results|length }} Results</span>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead class="table-light">
+                    <tr>
+                        <th>Match Date</th>
+                        <th>Match</th>
+                        <th>Predicted</th>
+                        <th>Confidence</th>
+                        <th>Actual</th>
+                        <th>Accuracy</th>
+                        <th>Over/Under</th>
+                        <th>Goal Probabilities</th>
+                        <th>Fixture Score</th>
+                        <th>Breakdown</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for result in existing_results %}
+                    <tr>
+                        <td>
+                            <span class="badge bg-secondary">{{ result.match_date }}</span>
+                        </td>
+                        <td>
+                            <strong>{{ result.home_team_name }}</strong> vs <strong>{{ result.away_team_name }}</strong>
+                            <br><small class="text-muted">Predicted on: {{ result.prediction_date }}</small>
+                        </td>
+                        <td>
+                            <div class="text-center">
+                                <span class="fw-bold fs-5">{{ "%.1f"|format(result.predicted_total_corners) }}</span>
+                                <br><small class="text-muted">
+                                    {{ "%.1f"|format(result.predicted_home_corners) }} + {{ "%.1f"|format(result.predicted_away_corners) }}
+                                </small>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="text-center">
+                                <div class="d-flex flex-column gap-1">
+                                    <span class="badge bg-info">
+                                        O5.5: {{ "%.1f"|format(result.confidence_5_5) }}%
+                                    </span>
+                                    <span class="badge bg-info">
+                                        O6.5: {{ "%.1f"|format(result.confidence_6_5) }}%
+                                    </span>
+                                </div>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="text-center">
+                                {% if result.actual_total_corners is not none %}
+                                    <span class="fw-bold fs-5 badge bg-dark">{{ result.actual_total_corners }}</span>
+                                {% else %}
+                                    <span class="text-muted">N/A</span>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td>
+                            {% if result.prediction_accuracy is not none %}
+                                <div class="text-center">
+                                    <div class="fw-bold {% if result.prediction_accuracy >= 70 %}text-success{% elif result.prediction_accuracy >= 50 %}text-warning{% else %}text-danger{% endif %}">
+                                        {{ "%.1f"|format(result.prediction_accuracy) }}%
+                                    </div>
+                                    <div class="progress mt-1" style="height: 6px;">
+                                        <div class="progress-bar {% if result.prediction_accuracy >= 70 %}bg-success{% elif result.prediction_accuracy >= 50 %}bg-warning{% else %}bg-danger{% endif %}" 
+                                             style="width: {{ result.prediction_accuracy }}%"></div>
+                                    </div>
+                                </div>
+                            {% else %}
+                                <span class="text-muted">N/A</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if result.actual_total_corners is not none %}
+                                <div class="d-flex flex-column gap-1">
+                                    {% if result.over_5_5_correct %}
+                                        <span class="badge bg-success">O5.5 ✓</span>
+                                    {% else %}
+                                        <span class="badge bg-danger">O5.5 ✗</span>
+                                    {% endif %}
+                                    {% if result.over_6_5_correct %}
+                                        <span class="badge bg-success">O6.5 ✓</span>
+                                    {% else %}
+                                        <span class="badge bg-danger">O6.5 ✗</span>
+                                    {% endif %}
+                                </div>
+                            {% else %}
+                                <span class="text-muted">Pending</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if result.home_score_probability and result.away_score_probability %}
+                            <div class="d-flex flex-column gap-1">
+                                <!-- 1+ Goals Row -->
+                                <div class="d-flex justify-content-between gap-1">
+                                    <small class="text-muted fw-bold me-1">1+</small>
+                                    <span class="badge bg-light text-dark small">
+                                        🏠 {{ "%.0f"|format(result.home_score_probability) }}%
+                                    </span>
+                                    <span class="badge bg-light text-dark small">
+                                        ✈️ {{ "%.0f"|format(result.away_score_probability) }}%
+                                    </span>
+                                </div>
+                                <!-- 2+ Goals Row -->
+                                {% if result.home_2plus_probability and result.away_2plus_probability %}
+                                <div class="d-flex justify-content-between gap-1">
+                                    <small class="text-muted fw-bold me-1">2+</small>
+                                    <span class="badge bg-secondary text-white small">
+                                        🏠 {{ "%.0f"|format(result.home_2plus_probability) }}%
+                                    </span>
+                                    <span class="badge bg-secondary text-white small">
+                                        ✈️ {{ "%.0f"|format(result.away_2plus_probability) }}%
+                                    </span>
+                                </div>
+                                {% endif %}
+                            </div>
+                            {% else %}
+                            <span class="text-muted">N/A</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="text-center">
+                                {% if result.goals_home is not none and result.goals_away is not none %}
+                                    <span class="badge bg-dark fs-6 fw-bold">
+                                        {{ result.goals_home }}-{{ result.goals_away }}
+                                    </span>
+                                    <br><small class="text-muted">FT Score</small>
+                                {% else %}
+                                    <span class="text-muted">No Score</span>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td>
+                            <div class="d-flex flex-column gap-1">
+                                {% if result.home_team_id and result.away_team_id %}
+                                    <a href="{{ url_for('analysis_details', home_team_id=result.home_team_id, away_team_id=result.away_team_id, season=result.season, backtest_date=result.prediction_date) }}" 
+                                       class="btn btn-sm btn-outline-primary" target="_blank">
+                                        <i class="fas fa-chart-bar"></i> Corner Analysis
+                                    </a>
+                                    <a href="{{ url_for('goal_analysis_details', home_team_id=result.home_team_id, away_team_id=result.away_team_id, season=result.season, backtest_date=result.prediction_date) }}" 
+                                       class="btn btn-sm btn-outline-success" target="_blank">
+                                        <i class="fas fa-futbol"></i> Goals Analysis
+                                    </a>
+                                {% else %}
+                                    <span class="text-muted small">No analysis<br>available</span>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Results Summary -->
+        {% if existing_results|length > 0 %}
+        <div class="mt-3">
+            <div class="row">
+                <div class="col-md-12">
+                    <div class="alert alert-light">
+                        <strong>Quick Stats:</strong>
+                        Total Results: {{ existing_results|length }} | 
+                        Avg Accuracy: {{ "%.1f"|format(summary.average_accuracy or 0) }}% |
+                        Over 5.5 Success: {{ "%.1f"|format(summary.over_5_5_success_rate or 0) }}% |
+                        Over 6.5 Success: {{ "%.1f"|format(summary.over_6_5_success_rate or 0) }}%
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% else %}
+<div class="card">
+    <div class="card-body text-center py-5">
+        <i class="fas fa-calendar-alt fa-3x text-muted mb-3"></i>
+        <h5>No Backtest Results Yet</h5>
+        <p class="text-muted">Select a historical date above to start analyzing past predictions.</p>
+        <p class="text-muted"><strong>Available dates:</strong> {{ available_dates|length }} days with matches</p>
+    </div>
+</div>
+{% endif %}
+
+{% endif %}
+
+<script>
+// Season filter function
+function changeSeason() {
+    const season = document.getElementById('seasonFilter').value;
+    window.location.href = `${window.location.pathname}?season=${season}`;
+}
+
+function selectAvailableDate() {
+    const select = document.getElementById('availableDates');
+    const dateInput = document.getElementById('backtestDate');
+    
+    if (select.value) {
+        dateInput.value = select.value;
+    }
+}
+
+async function runDateBacktest() {
+    const dateInput = document.getElementById('backtestDate');
+    const btn = document.getElementById('runBacktestBtn');
+    const progressCard = document.getElementById('progressCard');
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+    const progressTitle = document.getElementById('progressTitle');
+    
+    if (!dateInput.value) {
+        alert('Please select a date to analyze!');
+        return;
+    }
+    
+    const targetDate = dateInput.value;
+    const season = document.getElementById('seasonFilter').value;
+    
+    // Show progress
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Running...';
+    progressCard.style.display = 'block';
+    progressTitle.textContent = `Analyzing ${season} matches for ${targetDate}...`;
+    progressText.textContent = 'Fetching matches and historical data...';
+    progressBar.style.width = '25%';
+    
+    try {
+        const response = await fetch('/api/run-date-backtest', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                target_date: targetDate,
+                season: parseInt(season)
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Update progress
+            progressBar.style.width = '100%';
+            progressBar.classList.remove('progress-bar-animated');
+            progressBar.classList.add('bg-success');
+            progressText.textContent = `Success! Processed ${data.processed} matches with ${data.stored} results stored.`;
+            
+            // Show detailed results
+            let detailsHtml = '<br><strong>Results Summary:</strong><ul>';
+            data.results.forEach(result => {
+                detailsHtml += `<li>${result.home_team} vs ${result.away_team}: Predicted ${result.predicted_total.toFixed(1)} corners`;
+                if (result.actual_total !== null) {
+                    detailsHtml += `, Actual ${result.actual_total} (${result.accuracy ? result.accuracy.toFixed(1) : 'N/A'}% accuracy)`;
+                }
+                detailsHtml += '</li>';
+            });
+            detailsHtml += '</ul>';
+            
+            progressText.innerHTML += detailsHtml;
+            
+            // Reload page after delay to show new results
+            setTimeout(() => {
+                location.reload();
+            }, 3000);
+            
+        } else {
+            throw new Error(data.error || 'Unknown error occurred');
+        }
+        
+    } catch (error) {
+        console.error('Backtest error:', error);
+        progressBar.classList.remove('progress-bar-animated');
+        progressBar.classList.add('bg-danger');
+        progressBar.style.width = '100%';
+        progressText.innerHTML = `<strong>Error:</strong> ${error.message}`;
+        
+        // Reset after delay
+        setTimeout(() => {
+            progressCard.style.display = 'none';
+        }, 5000);
+    } finally {
+        // Re-enable button
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-play"></i> Run Backtest for Date';
+    }
+}
+
+// Batch Backtesting Function
+async function runBatchBacktest() {
+    const btn = document.getElementById('runBatchBtn');
+    const progressCard = document.getElementById('batchProgressCard');
+    const progressBar = document.getElementById('batchProgressBar');
+    const progressText = document.getElementById('batchProgressText');
+    const processedCount = document.getElementById('processedCount');
+    const successCount = document.getElementById('successCount');
+    const predictionCount = document.getElementById('predictionCount');
+    const successRate = document.getElementById('successRate');
+    
+    const maxDates = document.getElementById('maxDates').value || null;
+    const season = document.getElementById('batchSeason').value;
+    
+    try {
+        // Disable button and show progress
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+        progressCard.style.display = 'block';
+        progressText.textContent = 'Initializing batch processing...';
+        progressBar.style.width = '5%';
+        
+        // Reset counters
+        processedCount.textContent = '0';
+        successCount.textContent = '0';
+        predictionCount.textContent = '0';
+        successRate.textContent = '0%';
+        
+        console.log('🚀 Starting batch backtest...');
+        
+        // Make API call
+        const response = await fetch('/api/run-batch-backtest', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                season: parseInt(season),
+                max_dates: maxDates ? parseInt(maxDates) : null
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            // Update progress bar to completion
+            progressBar.style.width = '100%';
+            progressBar.classList.remove('progress-bar-animated');
+            progressText.textContent = 'Completed!';
+            
+            // Update counters
+            processedCount.textContent = result.data.dates_processed || 0;
+            successCount.textContent = result.data.successful_dates || 0;
+            predictionCount.textContent = result.data.total_predictions || 0;
+            successRate.textContent = (result.data.success_rate || 0) + '%';
+            
+            // Show success message
+            alert(`✅ Batch backtesting completed!\\n\\n` +
+                  `📊 Results:\\n` +
+                  `• Dates processed: ${result.data.dates_processed}/${result.data.dates_available}\\n` +
+                  `• Success rate: ${result.data.success_rate}%\\n` +
+                  `• Total predictions: ${result.data.total_predictions}\\n` +
+                  `• Failed dates: ${result.data.failed_dates}`);
+            
+            // Refresh page to show new results
+            setTimeout(() => {
+                window.location.reload();
+            }, 2000);
+            
+        } else {
+            throw new Error(result.error || 'Batch backtesting failed');
+        }
+        
+    } catch (error) {
+        console.error('Batch backtest error:', error);
+        
+        // Update progress bar to show error
+        progressBar.classList.remove('progress-bar-animated');
+        progressBar.classList.add('bg-danger');
+        progressText.textContent = 'Error occurred';
+        
+        alert(`❌ Batch backtesting failed:\\n${error.message}`);
+        
+    } finally {
+        // Re-enable button after delay
+        setTimeout(() => {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-rocket"></i> Run Batch Backtest';
+            progressCard.style.display = 'none';
+            progressBar.classList.remove('bg-danger');
+            progressBar.classList.add('bg-success', 'progress-bar-animated');
+        }, 5000);
+    }
+}
+
+// Auto-fill today's date as default
+document.addEventListener('DOMContentLoaded', function() {
+    const dateInput = document.getElementById('backtestDate');
+    const today = new Date();
+    const lastWeek = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+    dateInput.value = lastWeek.toISOString().split('T')[0];
+});
+</script>
+
+{% endblock %}

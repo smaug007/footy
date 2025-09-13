@@ -228,6 +228,151 @@ class APIFootballClient:
         params = {'fixture': fixture_id}
         return self._make_request('/fixtures/statistics', params)
     
+    def get_fixture_details(self, fixture_id: int) -> Dict:
+        """Get detailed fixture information including goals and match data."""
+        params = {'id': fixture_id}
+        response = self._make_request('/fixtures', params)
+        
+        if response and 'response' in response and response['response']:
+            fixture_data = response['response'][0]
+            return self._process_fixture_details(fixture_data)
+        return None
+    
+    def _process_fixture_details(self, fixture_data: Dict) -> Dict:
+        """Process raw fixture data to extract structured information."""
+        try:
+            # Extract basic fixture information
+            fixture_info = fixture_data.get('fixture', {})
+            teams_info = fixture_data.get('teams', {})
+            
+            # Extract goal data
+            goals_data = fixture_data.get('goals', {})
+            score_data = fixture_data.get('score', {})
+            
+            # Extract fulltime, halftime, and other scores
+            fulltime = score_data.get('fulltime', {}) if score_data else {}
+            halftime = score_data.get('halftime', {}) if score_data else {}
+            extratime = score_data.get('extratime', {}) if score_data else {}
+            penalty = score_data.get('penalty', {}) if score_data else {}
+            
+            # Build structured response
+            processed_data = {
+                'fixture_id': fixture_info.get('id'),
+                'date': fixture_info.get('date'),
+                'venue': fixture_info.get('venue', {}).get('name'),
+                'status': fixture_info.get('status', {}),
+                'referee': fixture_info.get('referee'),
+                
+                # Team information
+                'home_team': {
+                    'id': teams_info.get('home', {}).get('id'),
+                    'name': teams_info.get('home', {}).get('name'),
+                    'logo': teams_info.get('home', {}).get('logo')
+                },
+                'away_team': {
+                    'id': teams_info.get('away', {}).get('id'),
+                    'name': teams_info.get('away', {}).get('name'),
+                    'logo': teams_info.get('away', {}).get('logo')
+                },
+                
+                # Goal data - primary source
+                'goals': {
+                    'home': goals_data.get('home'),
+                    'away': goals_data.get('away')
+                },
+                
+                # Detailed score breakdown
+                'score': {
+                    'fulltime': {
+                        'home': fulltime.get('home'),
+                        'away': fulltime.get('away')
+                    },
+                    'halftime': {
+                        'home': halftime.get('home'),
+                        'away': halftime.get('away')
+                    },
+                    'extratime': {
+                        'home': extratime.get('home'),
+                        'away': extratime.get('away')
+                    },
+                    'penalty': {
+                        'home': penalty.get('home'),
+                        'away': penalty.get('away')
+                    }
+                },
+                
+                # Convenience fields for easy access
+                'home_goals': goals_data.get('home'),
+                'away_goals': goals_data.get('away'),
+                'total_goals': (goals_data.get('home') or 0) + (goals_data.get('away') or 0) if goals_data.get('home') is not None and goals_data.get('away') is not None else None,
+                
+                # Keep original data for compatibility
+                'raw_data': fixture_data
+            }
+            
+            logger.debug(f"Processed fixture {fixture_info.get('id')}: {processed_data['home_team']['name']} {processed_data['home_goals']}-{processed_data['away_goals']} {processed_data['away_team']['name']}")
+            return processed_data
+            
+        except Exception as e:
+            logger.error(f"Error processing fixture details: {e}")
+            # Return original data as fallback
+            return fixture_data
+    
+    def get_fixture_corner_statistics(self, fixture_id: int) -> Dict:
+        """Get corner statistics specifically for a fixture."""
+        try:
+            # Get full fixture statistics
+            stats_response = self.get_fixture_statistics(fixture_id)
+            
+            if not stats_response or 'response' not in stats_response:
+                return None
+            
+            # Extract corner data from statistics
+            corner_data = {
+                'fixture_id': fixture_id,
+                'home_corners': None,
+                'away_corners': None,
+                'total_corners': None
+            }
+            
+            # Parse statistics response
+            response_data = stats_response.get('response', [])
+            
+            for team_stats in response_data:
+                statistics = team_stats.get('statistics', [])
+                team_type = 'home' if team_stats.get('team', {}).get('id') else 'away'
+                
+                # Find corners statistic (API uses 'Corner Kicks')
+                for stat in statistics:
+                    if stat.get('type') == 'Corner Kicks':
+                        corner_value = stat.get('value')
+                        
+                        # Convert to integer if possible
+                        try:
+                            corner_value = int(corner_value) if corner_value is not None and corner_value != 'None' else 0
+                        except (ValueError, TypeError):
+                            corner_value = 0
+                        
+                        # Determine if this is home or away team
+                        # API-Football returns two objects in response array: [home_team_stats, away_team_stats]
+                        if len(response_data) == 2:
+                            if response_data.index(team_stats) == 0:
+                                corner_data['home_corners'] = corner_value
+                            else:
+                                corner_data['away_corners'] = corner_value
+                        
+                        break
+            
+            # Calculate total corners
+            if corner_data['home_corners'] is not None and corner_data['away_corners'] is not None:
+                corner_data['total_corners'] = corner_data['home_corners'] + corner_data['away_corners']
+            
+            return corner_data
+            
+        except Exception as e:
+            logger.error(f"Error getting corner statistics for fixture {fixture_id}: {e}")
+            return None
+    
     def get_teams(self, league_id: int, season: int) -> Dict:
         """Get teams for a league and season."""
         params = {
@@ -235,6 +380,14 @@ class APIFootballClient:
             'season': season
         }
         return self._make_request('/teams', params)
+    
+    def get_standings(self, league_id: int, season: int) -> Dict:
+        """Get league standings/table for a league and season."""
+        params = {
+            'league': league_id,
+            'season': season
+        }
+        return self._make_request('/standings', params)
     
     def get_china_super_league_fixtures(self, season: int = None, status: str = None) -> Dict:
         """Get China Super League fixtures."""
@@ -249,6 +402,13 @@ class APIFootballClient:
             season = datetime.now().year
             
         return self.get_teams(Config.CHINA_SUPER_LEAGUE_ID, season)
+    
+    def get_china_super_league_standings(self, season: int = None) -> Dict:
+        """Get China Super League standings/table."""
+        if season is None:
+            season = datetime.now().year
+            
+        return self.get_standings(Config.CHINA_SUPER_LEAGUE_ID, season)
     
     def get_upcoming_fixtures(self, days_ahead: int = 7) -> Dict:
         """Get upcoming CSL fixtures within specified days."""

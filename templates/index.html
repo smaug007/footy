@@ -3,8 +3,62 @@
 {% block title %}Corner Predictions - China Super League{% endblock %}
 
 {% block content %}
+
+<!-- Enhanced System Status Banner -->
+{% if enhanced_stats and enhanced_stats.enhanced_available %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="alert alert-success border-0 shadow-sm" role="alert">
+            <div class="d-flex align-items-center">
+                <i class="fas fa-sparkles fa-2x text-success me-3"></i>
+                <div class="flex-grow-1">
+                    <h5 class="alert-heading mb-1">
+                        🚀 Enhanced BTTS Prediction System Active!
+                    </h5>
+                    <p class="mb-2">
+                        Sophisticated Both Teams To Score analysis is now available with advanced analytics, 
+                        dynamic weighting, and comprehensive validation tracking.
+                    </p>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <span class="text-muted">
+                            <i class="fas fa-info-circle me-1"></i> Enhanced features available in main prediction interface
+                        </span>
+                    </div>
+                </div>
+                <div class="text-end">
+                    <small class="text-muted">
+                        <i class="fas fa-database me-1"></i>
+                        {{ enhanced_stats.schema_version }}<br>
+                        <i class="fas fa-chart-bar me-1"></i>
+                        {{ enhanced_stats.recent_predictions_count }} recent predictions
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% elif enhanced_stats and not enhanced_stats.enhanced_available %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="alert alert-info border-0 shadow-sm" role="alert">
+            <div class="d-flex align-items-center">
+                <i class="fas fa-info-circle fa-2x text-info me-3"></i>
+                <div class="flex-grow-1">
+                    <h6 class="alert-heading mb-1">Enhanced BTTS System Available</h6>
+                    <p class="mb-0">
+                        Run the database migration to unlock sophisticated BTTS analysis features.
+                        <code class="ms-2">python migrate_to_enhanced_schema.py</code>
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <div class="row">
-    <div class="col-lg-8 mx-auto">
+    <!-- Main Prediction Interface -->
+    <div class="col-lg-8">
         <div class="card">
             <div class="card-header bg-primary text-white">
                 <h4 class="mb-0">
@@ -12,37 +66,292 @@
                 </h4>
             </div>
             <div class="card-body">
-                <div class="alert alert-info" role="alert">
-                    <strong>Welcome!</strong> This system predicts corner kicks for China Super League matches using consistency-based analysis.
-                    <br><small>Phase 1 Development - Basic structure ready, API integration coming soon.</small>
-                </div>
+                <!-- Tab Navigation -->
+                <ul class="nav nav-tabs mb-4" id="predictionTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="fixtures-tab" data-bs-toggle="tab" data-bs-target="#fixtures-pane" type="button" role="tab" aria-controls="fixtures-pane" aria-selected="true">
+                            <i class="fas fa-calendar-alt"></i> Upcoming Fixtures
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="custom-tab" data-bs-toggle="tab" data-bs-target="#custom-pane" type="button" role="tab" aria-controls="custom-pane" aria-selected="false">
+                            <i class="fas fa-cogs"></i> Custom Analysis
+                        </button>
+                    </li>
+                </ul>
 
-                <!-- Fixture Selection Form -->
-                <form id="prediction-form">
-                    <div class="mb-3">
-                        <label for="fixture-select" class="form-label">Select Upcoming Match</label>
-                        <select class="form-select" id="fixture-select" required>
-                            <option value="">Loading fixtures...</option>
-                        </select>
+                <!-- Tab Content -->
+                <div class="tab-content" id="predictionTabsContent">
+                    <!-- Upcoming Fixtures Tab -->
+                    <div class="tab-pane fade show active" id="fixtures-pane" role="tabpanel" aria-labelledby="fixtures-tab">
+                        <!-- Date Filter Buttons -->
+                        <div class="row mb-4">
+                            <div class="col-12">
+                                <div class="btn-toolbar justify-content-center" role="toolbar" aria-label="Date filter toolbar">
+                                    <div class="btn-group me-2 date-filter-group" role="group" aria-label="Date filters">
+                                        <input type="radio" class="btn-check" name="dateFilter" id="filter-today" value="today">
+                                        <label class="btn btn-outline-primary" for="filter-today">Today</label>
+
+                                        <input type="radio" class="btn-check" name="dateFilter" id="filter-tomorrow" value="tomorrow">
+                                        <label class="btn btn-outline-primary" for="filter-tomorrow">Tomorrow</label>
+
+                                        <input type="radio" class="btn-check" name="dateFilter" id="filter-3days" value="3days">
+                                        <label class="btn btn-outline-primary" for="filter-3days">Next 3 Days</label>
+
+                                        <input type="radio" class="btn-check" name="dateFilter" id="filter-week" value="week">
+                                        <label class="btn btn-outline-primary" for="filter-week">Next Week</label>
+
+                                        <input type="radio" class="btn-check" name="dateFilter" id="filter-2weeks" value="2weeks" checked>
+                                        <label class="btn btn-outline-primary" for="filter-2weeks">Next 2 Weeks</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Season Selector for Fixtures -->
+                        <div class="row mb-3">
+                            <div class="col-md-6 mx-auto">
+                                <label for="fixtures-season-select" class="form-label">
+                                    <i class="fas fa-calendar"></i> Season
+                                </label>
+                                <select class="form-select" id="fixtures-season-select">
+                                    <option value="2025" selected>2025</option>
+                                    <option value="2024">2024</option>
+                                    <option value="2023">2023</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Fixtures List Container -->
+                        <div id="fixtures-container">
+                            <div class="text-center">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading fixtures...</span>
+                                </div>
+                                <p class="mt-2 text-muted">Loading upcoming fixtures...</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Custom Analysis Tab -->
+                    <div class="tab-pane fade" id="custom-pane" role="tabpanel" aria-labelledby="custom-tab">
+                        <div class="alert alert-success" role="alert">
+                            <i class="fas fa-rocket"></i>
+                            <strong>System Ready!</strong> Advanced corner prediction system with statistical analysis, head-to-head data, and 90%+ accuracy targeting.
+                            <br><small>Predict over 5.5 and 6.5 corner lines with confidence levels based on team consistency analysis.</small>
+                        </div>
+
+                        <!-- Team Selection Form -->
+                        <form id="prediction-form">
+                    <div class="row">
+                        <div class="col-md-5">
+                            <div class="mb-3">
+                                <label for="home-team-select" class="form-label">
+                                    <i class="fas fa-home"></i> Home Team
+                                </label>
+                                <select class="form-select" id="home-team-select" required>
+                                    <option value="">Loading teams...</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-2 text-center">
+                            <div class="mt-4 pt-2">
+                                <h5 class="text-muted">VS</h5>
+                            </div>
+                        </div>
+                        <div class="col-md-5">
+                            <div class="mb-3">
+                                <label for="away-team-select" class="form-label">
+                                    <i class="fas fa-plane"></i> Away Team
+                                </label>
+                                <select class="form-select" id="away-team-select" required>
+                                    <option value="">Loading teams...</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="season-select" class="form-label">
+                                <i class="fas fa-calendar"></i> Season
+                            </label>
+                            <select class="form-select" id="season-select">
+                                <option value="2025" selected>2025</option>
+                                <option value="2024">2024</option>
+                                <option value="2023">2023</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">
+                                <i class="fas fa-info-circle"></i> Analysis Mode
+                            </label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="include-h2h" checked>
+                                <label class="form-check-label" for="include-h2h">
+                                    Include Head-to-Head Analysis
+                                </label>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="d-grid">
                         <button type="submit" class="btn btn-primary btn-lg" id="predict-btn">
-                            <i class="fas fa-chart-line"></i> Generate Prediction
+                            <i class="fas fa-chart-line"></i> Generate Advanced Prediction
                         </button>
                     </div>
                 </form>
 
-                <!-- Prediction Results (Hidden initially) -->
-                <div id="prediction-results" class="mt-4" style="display: none;">
-                    <hr>
-                    <h5>Prediction Results</h5>
-                    <div id="results-content">
-                        <!-- Results will be populated here -->
+                        <!-- Prediction Results -->
+                        <div id="prediction-results" class="mt-4" style="display: none;">
+                            <hr>
+                            <div id="results-content">
+                                <!-- Results will be populated here by JavaScript -->
+                            </div>
+                        </div>
+
+                        <!-- Quick Match Suggestions -->
+                        <div class="card mt-4">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-lightbulb"></i> Quick Match Suggestions
+                </h5>
+            </div>
+            <div class="card-body">
+                <div id="match-suggestions">
+                    <div class="text-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading suggestions...</span>
+                        </div>
+                        <p class="mt-2 text-muted">Finding high-confidence betting opportunities...</p>
+                        </div>
+                    </div>
+                    <!-- End Custom Analysis Tab -->
+                </div>
+                <!-- End Tab Content -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Sidebar -->
+    <div class="col-lg-4">
+        <!-- System Performance -->
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-tachometer-alt"></i> System Performance
+                </h5>
+            </div>
+            <div class="card-body">
+                <div id="system-performance">
+                    <div class="text-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading performance...</span>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
+
+        <!-- Recent Predictions -->
+        <div class="card mt-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="fas fa-history"></i> Recent Predictions
+                </h5>
+                <a href="{{ url_for('predictions_history') }}" class="btn btn-sm btn-outline-primary">
+                    <i class="fas fa-list"></i> View All
+                </a>
+            </div>
+            <div class="card-body">
+                <div id="recent-predictions">
+                    <div class="text-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading recent predictions...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="card mt-3">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-tools"></i> Quick Actions
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <a href="{{ url_for('predictions_history') }}" class="btn btn-outline-success">
+                        <i class="fas fa-history"></i> My Predictions
+                    </a>
+                    <a href="/accuracy-dashboard" class="btn btn-outline-primary">
+                        <i class="fas fa-chart-bar"></i> View Accuracy Dashboard
+                    </a>
+                    <button class="btn btn-outline-secondary" onclick="loadTeams(); loadSuggestions(); loadPerformance();">
+                        <i class="fas fa-sync-alt"></i> Refresh Data
+                    </button>
+                    <button class="btn btn-outline-info" onclick="showMethodologyModal()">
+                        <i class="fas fa-question-circle"></i> How It Works
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Methodology Modal -->
+<div class="modal fade" id="methodologyModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-brain"></i> Prediction Methodology
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <h6>Our Advanced Corner Prediction System Uses:</h6>
+                <ul class="list-unstyled">
+                    <li><i class="fas fa-check text-success"></i> <strong>Weighted Averages:</strong> Recent games weighted higher than older ones</li>
+                    <li><i class="fas fa-check text-success"></i> <strong>Consistency Analysis:</strong> Statistical deviation and coefficient of variation</li>
+                    <li><i class="fas fa-check text-success"></i> <strong>Trend Detection:</strong> Linear regression on recent performance</li>
+                    <li><i class="fas fa-check text-success"></i> <strong>Head-to-Head Data:</strong> Historical matchup analysis (up to 3 seasons)</li>
+                    <li><i class="fas fa-check text-success"></i> <strong>Reliability Thresholds:</strong> 90% hit rate line identification</li>
+                    <li><i class="fas fa-check text-success"></i> <strong>Home Advantage:</strong> Venue-specific performance factors</li>
+                </ul>
+                
+                <h6 class="mt-4">Confidence Levels:</h6>
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="text-center p-3 bg-success text-white rounded">
+                            <strong>80%+ Confidence</strong><br>
+                            <small>Strong statistical backing</small>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="text-center p-3 bg-warning text-dark rounded">
+                            <strong>60-79% Confidence</strong><br>
+                            <small>Moderate statistical support</small>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="text-center p-3 bg-danger text-white rounded">
+                            <strong>Below 60%</strong><br>
+                            <small>Low confidence, avoid betting</small>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="alert alert-info mt-3">
+                    <i class="fas fa-info-circle"></i>
+                    <strong>Note:</strong> This system is for educational purposes only. Always gamble responsibly and within your means.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
                         <!-- System Status Card -->
         <div class="card mt-4">
@@ -101,109 +410,1216 @@
 
 {% block extra_js %}
 <script>
-// Load fixtures and system status when page loads
+// Initialize page when DOM loads
 document.addEventListener('DOMContentLoaded', function() {
-    loadSystemStatus();
+    loadTeams();
+    loadSuggestions();
+    loadPerformance();
+    loadRecentPredictions();
+    
+    // Initialize fixtures tab
     loadFixtures();
+    
+    // Add event listener for season change (custom analysis)
+    const seasonSelect = document.getElementById('season-select');
+    seasonSelect.addEventListener('change', function() {
+        loadTeams(); // Reload teams when season changes
+        loadSuggestions(); // Reload suggestions for new season
+    });
+    
+    // Add event listener for fixtures season change
+    const fixturesSeasonSelect = document.getElementById('fixtures-season-select');
+    fixturesSeasonSelect.addEventListener('change', function() {
+        loadFixtures(); // Reload fixtures when season changes
+    });
+    
+    // Add event listeners for date filter changes
+    const dateFilters = document.querySelectorAll('input[name="dateFilter"]');
+    dateFilters.forEach(filter => {
+        filter.addEventListener('change', function() {
+            if (this.checked) {
+                loadFixtures(); // Reload fixtures when filter changes
+            }
+        });
+    });
+    
+    // Add event listener for tab changes
+    const fixturesTab = document.getElementById('fixtures-tab');
+    fixturesTab.addEventListener('shown.bs.tab', function() {
+        loadFixtures(); // Reload fixtures when tab is shown
+    });
 });
 
-// Load system status
-async function loadSystemStatus() {
+// Load fixtures for the fixtures tab
+async function loadFixtures() {
+    console.log('🔍 DEBUG: loadFixtures() called');
+    
+    const fixturesContainer = document.getElementById('fixtures-container');
+    const fixturesSeasonSelect = document.getElementById('fixtures-season-select');
+    const selectedFilter = document.querySelector('input[name="dateFilter"]:checked');
+    
+    const season = fixturesSeasonSelect.value || 2025;
+    const filter = selectedFilter ? selectedFilter.value : '2weeks';
+    
+    console.log('🔍 DEBUG: Parameters:', {season, filter});
+    
     try {
-        const response = await fetch('/api/status');
+        // Check if CSLPredictions exists
+        if (typeof CSLPredictions === 'undefined') {
+            console.error('❌ CSLPredictions is not defined!');
+            fixturesContainer.innerHTML = '<div class="alert alert-danger">JavaScript error: CSLPredictions not loaded</div>';
+            return;
+        }
+        
+        console.log('✅ CSLPredictions available:', Object.keys(CSLPredictions));
+        
+        // Show loading
+        CSLPredictions.showLoading(fixturesContainer, { 
+            overlay: true, 
+            message: 'Loading fixtures...' 
+        });
+        
+        console.log('🔍 DEBUG: Making API request...');
+        const response = await CSLPredictions.apiRequest(`/api/fixtures/upcoming?season=${season}&filter=${filter}`);
+        console.log('🔍 DEBUG: API response:', response);
+        
+        if (response.status === 'success') {
+            const fixtures = response.data.fixtures || [];
+            
+            if (fixtures.length > 0) {
+                let fixturesHTML = `
+                    <div class="row">
+                        <div class="col-12">
+                            <div class="alert fixtures-info-alert">
+                                <i class="fas fa-info-circle"></i>
+                                Found <strong>${fixtures.length} fixtures</strong> for ${filter} in ${season} season.
+                                ${response.data.team_matching ? `${response.data.team_matching.predictable_fixtures} are ready for prediction.` : ''}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                // Show initial fixtures with loading predictions
+                displayFixturesWithLoadingPredictions(fixtures, filter, season, fixturesContainer);
+                
+                // Generate predictions for predictable fixtures
+                const predictableFixtures = fixtures.filter(f => f.can_predict);
+                if (predictableFixtures.length > 0) {
+                    generateBatchPredictions(predictableFixtures, season).then(predictions => {
+                        displayFixturesWithPredictions(fixtures, predictions, filter, season, fixturesContainer);
+                    }).catch(error => {
+                        console.error('Error generating batch predictions:', error);
+                    });
+                }
+            } else {
+                fixturesContainer.innerHTML = `
+                    <div class="fixtures-empty-state">
+                        <i class="fas fa-calendar-times fa-3x"></i>
+                        <h5>No Fixtures Found</h5>
+                        <p>No upcoming fixtures found for ${filter} in ${season} season.</p>
+                        <small>Try selecting a different time period or season.</small>
+                    </div>
+                `;
+            }
+        } else {
+            throw new Error(response.message || 'Failed to load fixtures');
+        }
+    } catch (error) {
+        fixturesContainer.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-triangle"></i>
+                <strong>Error loading fixtures:</strong> ${error.message}
+                <br>
+                <button class="btn btn-outline-danger btn-sm mt-2" onclick="loadFixtures()">
+                    <i class="fas fa-redo"></i> Try Again
+                </button>
+            </div>
+        `;
+        console.error('Failed to load fixtures:', error);
+    } finally {
+        CSLPredictions.hideLoading(fixturesContainer);
+    }
+}
+
+// Predict from fixture (called when clicking predict button in fixtures)
+async function predictFromFixture(homeTeamId, awayTeamId, homeTeamName, awayTeamName) {
+    const fixturesContainer = document.getElementById('fixtures-container');
+    const predictionResultsArea = document.getElementById('fixture-prediction-results') || createFixturePredictionResultsArea();
+    const predictButton = event.target;
+    
+    try {
+        // Show loading on the button
+        predictButton.disabled = true;
+        predictButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Predicting...';
+        
+        // Clear previous results
+        predictionResultsArea.style.display = 'none';
+        predictionResultsArea.innerHTML = '';
+        
+        // Show progress message
+        CSLPredictions.showAlert(`🔮 Generating prediction for ${homeTeamName} vs ${awayTeamName}...`, 'info', 2000);
+        
+        // Get current season
+        const seasonSelect = document.getElementById('fixtures-season-select');
+        const season = seasonSelect.value || 2025;
+        
+        // Make prediction API call
+        const response = await CSLPredictions.apiRequest('/api/predict', {
+            method: 'POST',
+            body: JSON.stringify({
+                home_team_id: parseInt(homeTeamId),
+                away_team_id: parseInt(awayTeamId),
+                season: parseInt(season)
+            })
+        });
+        
+        if (response.status === 'success') {
+            // Display prediction results inline
+            displayFixturePredictionResults(response.data, homeTeamName, awayTeamName, homeTeamId, awayTeamId, season);
+            predictionResultsArea.style.display = 'block';
+            
+            // Scroll to results
+            predictionResultsArea.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            
+            CSLPredictions.showAlert(`✅ Prediction complete for ${homeTeamName} vs ${awayTeamName}!`, 'success', 3000);
+        } else {
+            throw new Error(response.message || 'Prediction failed');
+        }
+    } catch (error) {
+        CSLPredictions.showAlert(`❌ Prediction failed: ${error.message}`, 'danger', 5000);
+        console.error('Prediction error:', error);
+        
+        // Fallback: Switch to custom analysis tab
+        CSLPredictions.showAlert(`📋 Switching to custom analysis for manual prediction...`, 'info', 3000);
+        setTimeout(() => {
+            switchToCustomAnalysis(homeTeamId, awayTeamId, homeTeamName, awayTeamName);
+        }, 1000);
+    } finally {
+        // Reset button
+        predictButton.disabled = false;
+        predictButton.innerHTML = '<i class="fas fa-chart-line"></i> Predict';
+    }
+}
+
+// Generate predictions for multiple fixtures
+async function generateBatchPredictions(fixtures, season) {
+    const predictions = {};
+    const batchSize = 3; // Process 3 fixtures at a time to avoid overwhelming the server
+    
+    for (let i = 0; i < fixtures.length; i += batchSize) {
+        const batch = fixtures.slice(i, i + batchSize);
+        const batchPromises = batch.map(fixture => 
+            generateSinglePrediction(fixture, season)
+        );
+        
+        try {
+            const batchResults = await Promise.all(batchPromises);
+            console.log(`📦 Batch ${Math.floor(i/batchSize) + 1} results:`, batchResults);
+            
+            batchResults.forEach((result, index) => {
+                const fixture = batch[index];
+                const key = `${fixture.home_team.db_id}_${fixture.away_team.db_id}`;
+                
+                console.log(`🔑 Processing result for ${fixture.home_team.name} vs ${fixture.away_team.name} (key: ${key}):`, result);
+                
+                if (result) {
+                    predictions[key] = result;
+                    console.log(`✅ Stored prediction for key ${key}`);
+                } else {
+                    predictions[key] = null; // Explicitly store null for failed predictions
+                    console.log(`❌ Stored null for failed prediction key ${key}`);
+                }
+            });
+        } catch (error) {
+            console.error('Batch prediction error:', error);
+        }
+        
+        // Small delay between batches to be nice to the server
+        if (i + batchSize < fixtures.length) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+    }
+    
+    return predictions;
+}
+
+// Generate prediction for a single fixture
+async function generateSinglePrediction(fixture, season) {
+    try {
+        console.log(`Attempting prediction for ${fixture.home_team.name} vs ${fixture.away_team.name} (IDs: ${fixture.home_team.db_id} vs ${fixture.away_team.db_id})`);
+        
+        const response = await fetch('/api/predict', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                home_team_id: fixture.home_team.db_id,
+                away_team_id: fixture.away_team.db_id,
+                season: season
+            })
+        });
+        
         const data = await response.json();
+        console.log(`📊 API Response for ${fixture.home_team.name} vs ${fixture.away_team.name}:`, data);
         
         if (data.status === 'success') {
-            const statusData = data.data;
-            
-            // Update API status
-            const apiElement = document.querySelector('#system-status .col-md-3:nth-child(2) div');
-            if (statusData.api_healthy) {
-                apiElement.className = 'text-success';
-                apiElement.querySelector('small').textContent = 'Connected';
-            } else {
-                apiElement.className = 'text-danger';
-                apiElement.querySelector('small').textContent = 'Error';
-            }
-            
-            // Show API details
-            document.getElementById('api-details').style.display = 'block';
-            document.getElementById('api-status-text').textContent = statusData.api_healthy ? 'Connected' : 'Error';
-            
-            const rateLimits = statusData.rate_limits || {};
-            document.getElementById('daily-calls').textContent = 
-                `${rateLimits.daily_calls || 0}/${rateLimits.daily_limit || 0}`;
+            console.log(`✅ Prediction successful for ${fixture.home_team.name} vs ${fixture.away_team.name}:`, data.data);
+            console.log(`🔍 Prediction structure:`, JSON.stringify(data.data, null, 2));
+            return data.data;
+        } else {
+            console.warn(`❌ Prediction failed for ${fixture.home_team.name} vs ${fixture.away_team.name}: ${data.message}`);
+            return null;
         }
     } catch (error) {
-        console.error('Failed to load system status:', error);
+        console.error('Single prediction error for fixture:', fixture, error);
+        return null;
     }
 }
 
-// Load fixtures
-async function loadFixtures() {
-    const fixtureSelect = document.getElementById('fixture-select');
-    const predictBtn = document.getElementById('predict-btn');
+// Display fixtures with loading predictions initially
+function displayFixturesWithLoadingPredictions(fixtures, filter, season, container) {
+    const predictableCount = fixtures.filter(f => f.can_predict).length;
+    
+    let fixturesHTML = `
+        <div class="row">
+            <div class="col-12">
+                <div class="alert alert-info fixtures-info-alert">
+                    <i class="fas fa-info-circle"></i>
+                    Found <strong>${fixtures.length} fixtures</strong> for ${filter} in ${season} season.
+                    ${predictableCount > 0 ? `Generating predictions for <strong>${predictableCount}</strong> matches...` : ''}
+                </div>
+            </div>
+        </div>
+    `;
+    
+    fixtures.forEach(fixture => {
+        fixturesHTML += createFixtureCard(fixture, null, season);
+    });
+    
+    container.innerHTML = fixturesHTML;
+}
+
+// Display fixtures with completed predictions
+function displayFixturesWithPredictions(fixtures, predictions, filter, season, container) {
+    const predictableCount = fixtures.filter(f => f.can_predict).length;
+    const predictedCount = Object.keys(predictions).length;
+    
+    console.log(`🎯 Displaying fixtures with predictions:`, {
+        fixtures: fixtures.length,
+        predictable: predictableCount,
+        predictions: predictedCount,
+        predictionKeys: Object.keys(predictions),
+        predictions: predictions
+    });
+    
+    let fixturesHTML = `
+        <div class="row">
+            <div class="col-12">
+                <div class="alert alert-success fixtures-info-alert">
+                    <i class="fas fa-check-circle"></i>
+                    Found <strong>${fixtures.length} fixtures</strong> for ${filter} in ${season} season.
+                    Generated predictions for <strong>${predictedCount}/${predictableCount}</strong> matches.
+                </div>
+            </div>
+        </div>
+    `;
+    
+    fixtures.forEach(fixture => {
+        const predictionKey = `${fixture.home_team.db_id}_${fixture.away_team.db_id}`;
+        const prediction = predictions[predictionKey];
+        
+        console.log(`🔍 Fixture ${fixture.home_team.name} vs ${fixture.away_team.name}:`, {
+            key: predictionKey,
+            prediction: prediction,
+            canPredict: fixture.can_predict
+        });
+        
+        fixturesHTML += createFixtureCard(fixture, prediction, season);
+    });
+    
+    container.innerHTML = fixturesHTML;
+}
+
+// Create enhanced fixture card with inline predictions
+function createFixtureCard(fixture, prediction, season) {
+    const fixtureDate = new Date(fixture.date);
+    const canPredict = fixture.can_predict;
+    
+    return `
+        <div class="card fixture-card mb-3 ${canPredict ? 'predictable' : 'not-predictable'}" data-fixture-id="${fixture.home_team.db_id}_${fixture.away_team.db_id}">
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <!-- Team Info (Smaller) -->
+                    <div class="col-md-4">
+                        <div class="fixture-teams mb-2">
+                            <strong>${fixture.home_team.name}</strong>
+                            <span class="fixture-vs">vs</span>
+                            <strong>${fixture.away_team.name}</strong>
+                        </div>
+                        <div class="fixture-date mb-1">
+                            <i class="fas fa-calendar"></i> ${fixtureDate.toLocaleDateString()} 
+                            <i class="fas fa-clock ms-2"></i> ${fixtureDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                        </div>
+                        <div class="fixture-venue">
+                            <i class="fas fa-map-marker-alt"></i> ${fixture.venue || 'TBD'}
+                            ${fixture.round ? `<span class="ms-2 text-muted">${fixture.round}</span>` : ''}
+                        </div>
+                    </div>
+                    
+                    <!-- Inline Predictions (Larger) -->
+                    <div class="col-md-8">
+                        ${canPredict ? 
+                            (prediction === null ? createFailedPredictionDisplay() : 
+                             prediction ? createInlinePredictionDisplay(prediction, fixture, season) : 
+                             createPredictionLoadingDisplay()) :
+                            createNoPredictionDisplay()
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// Create inline prediction display
+function createInlinePredictionDisplay(prediction, fixture, season) {
+    return `
+        <div class="inline-predictions">
+            <div class="row g-2 align-items-center">
+                <!-- Total Corners -->
+                <div class="col-md-2">
+                    <div class="prediction-stat text-center">
+                        <div class="stat-value text-primary">${prediction.predictions.predicted_total_corners.toFixed(1)}</div>
+                        <div class="stat-label">Total Corners</div>
+                    </div>
+                </div>
+                
+                <!-- Corner Lines -->
+                <div class="col-md-3">
+                    <div class="corner-lines">
+                        <div class="line-prediction mb-1">
+                            <span class="line-label">Over 5.5:</span>
+                            <span class="badge bg-${getConfidenceBadgeColor(prediction.line_predictions.over_5_5_confidence)}">
+                                ${prediction.line_predictions.over_5_5_confidence.toFixed(0)}%
+                            </span>
+                        </div>
+                        <div class="line-prediction">
+                            <span class="line-label">Over 6.5:</span>
+                            <span class="badge bg-${getConfidenceBadgeColor(prediction.line_predictions.over_6_5_confidence)}">
+                                ${prediction.line_predictions.over_6_5_confidence.toFixed(0)}%
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- BTTS & Team Scoring -->
+                ${prediction.goal_predictions ? `
+                <div class="col-md-3">
+                    <div class="goal-predictions">
+                        <!-- 1+ Goals BTTS -->
+                        <div class="btts-prediction mb-1">
+                            <span class="line-label">BTTS:</span>
+                            <span class="badge bg-${getBttsBadgeColor(prediction.goal_predictions.btts.btts_probability)}">
+                                ${prediction.goal_predictions.btts.btts_probability.toFixed(0)}%
+                            </span>
+                        </div>
+                        
+                        <!-- Team Scoring (1+ and 2+ Goals) -->
+                        <div class="team-scoring-detailed">
+                            <!-- 1+ Goals Row -->
+                            <div class="scoring-row mb-1">
+                                <small class="text-muted fw-bold me-1">1+</small>
+                                <span class="home-score small">🏠 ${prediction.goal_predictions.btts.home_team_score_probability.toFixed(0)}%</span>
+                                <span class="away-score small ms-2">✈️ ${prediction.goal_predictions.btts.away_team_score_probability.toFixed(0)}%</span>
+                            </div>
+                            
+                            <!-- 2+ Goals Row (if available) -->
+                            ${prediction.goal_predictions.btts_2plus ? `
+                            <div class="scoring-row">
+                                <small class="text-muted fw-bold me-1">2+</small>
+                                <span class="home-score small">🏠 ${prediction.goal_predictions.btts_2plus.home_team_2plus_probability.toFixed(0)}%</span>
+                                <span class="away-score small ms-2">✈️ ${prediction.goal_predictions.btts_2plus.away_team_2plus_probability.toFixed(0)}%</span>
+                            </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
+                ` : `
+                <div class="col-md-3">
+                    <div class="goal-predictions">
+                        <div class="text-muted small">
+                            <i class="fas fa-info-circle"></i> Goal predictions unavailable
+                        </div>
+                    </div>
+                </div>
+                `}
+                
+                <!-- Actions -->
+                <div class="col-md-4">
+                    <div class="prediction-actions">
+                        <div class="btn-group w-100" role="group">
+                            <a href="/analysis/${fixture.home_team.db_id}/${fixture.away_team.db_id}/${season}" 
+                               class="btn btn-outline-primary btn-sm"
+                               onclick="event.stopPropagation(); console.log('Corner Analysis clicked:', this.href); window.location.href = this.href; return false;">
+                                <i class="fas fa-microscope"></i> Analysis
+                            </a>
+                            <a href="/analysis/goals/${fixture.home_team.db_id}/${fixture.away_team.db_id}/${season}" 
+                               class="btn btn-outline-success btn-sm"
+                               onclick="event.stopPropagation(); console.log('Goal Analysis clicked:', this.href); console.log('Home team ID:', '${fixture.home_team.db_id}'); console.log('Away team ID:', '${fixture.away_team.db_id}'); console.log('Season:', '${season}'); window.location.href = this.href; return false;">
+                                <i class="fas fa-futbol"></i> Goals
+                            </a>
+                        </div>
+                        <div class="data-quality mt-1">
+                            <small class="text-muted">
+                                <span class="badge bg-${prediction.web_display?.reliability_badge || 'secondary'} badge-sm">
+                                    ${prediction.quality_metrics?.data_reliability || 'Unknown'}
+                                </span>
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// Create prediction loading display
+function createPredictionLoadingDisplay() {
+    return `
+        <div class="prediction-loading">
+            <div class="d-flex align-items-center">
+                <div class="spinner-border spinner-border-sm text-primary me-2" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <span class="text-muted">Generating predictions...</span>
+            </div>
+        </div>
+    `;
+}
+
+// Create failed prediction display
+function createFailedPredictionDisplay() {
+    return `
+        <div class="prediction-failed">
+            <div class="alert alert-warning mb-0">
+                <i class="fas fa-exclamation-triangle"></i>
+                <strong>Prediction Failed:</strong> Insufficient historical data for these teams.
+                <br><small class="text-muted">Try teams from previous seasons or with more match history.</small>
+            </div>
+        </div>
+    `;
+}
+
+// Create no prediction display
+function createNoPredictionDisplay() {
+    return `
+        <div class="no-prediction-display">
+            <div class="alert alert-warning mb-0">
+                <i class="fas fa-exclamation-triangle"></i>
+                <strong>Cannot Predict:</strong> Teams not found in database or insufficient data.
+            </div>
+        </div>
+    `;
+}
+
+// Helper functions for badge colors
+function getConfidenceBadgeColor(confidence) {
+    if (confidence >= 70) return 'success';
+    if (confidence >= 50) return 'warning';
+    return 'danger';
+}
+
+function getBttsBadgeColor(probability) {
+    if (probability >= 60) return 'success';
+    if (probability >= 40) return 'warning';
+    return 'secondary';
+}
+
+function getBttsRecommendation(probability, confidenceScore) {
+    if (probability >= 60 && confidenceScore >= 70) return 'BET';
+    if (probability <= 30 && confidenceScore >= 70) return 'AVOID';
+    return 'CONSIDER';
+}
+
+function getBttsRecommendationColor(probability, confidenceScore) {
+    const rec = getBttsRecommendation(probability, confidenceScore);
+    if (rec === 'BET') return 'success';
+    if (rec === 'AVOID') return 'danger';
+    return 'warning';
+}
+
+// Create prediction results area if it doesn't exist
+function createFixturePredictionResultsArea() {
+    const fixturesContainer = document.getElementById('fixtures-container');
+    const resultsArea = document.createElement('div');
+    resultsArea.id = 'fixture-prediction-results';
+    resultsArea.className = 'mt-4';
+    resultsArea.style.display = 'none';
+    
+    // Insert after fixtures container
+    fixturesContainer.parentNode.insertBefore(resultsArea, fixturesContainer.nextSibling);
+    return resultsArea;
+}
+
+// Display fixture prediction results inline
+function displayFixturePredictionResults(prediction, homeTeamName, awayTeamName, homeTeamId, awayTeamId, season) {
+    const predictionResultsArea = document.getElementById('fixture-prediction-results');
+    
+    const html = `
+        <div class="card border-primary">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">
+                    <i class="fas fa-chart-line"></i> Prediction Results: ${homeTeamName} vs ${awayTeamName}
+                </h5>
+            </div>
+            <div class="card-body">
+                <!-- Key Predictions -->
+                <div class="row text-center mb-4">
+                    <div class="col-md-4">
+                        <div class="p-3 bg-light rounded">
+                            <h3 class="text-primary mb-0">${prediction.predictions.predicted_total_corners.toFixed(1)}</h3>
+                            <small class="text-muted">Total Corners</small>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="p-3 bg-light rounded">
+                            <h4 class="text-success mb-0">${prediction.line_predictions.over_5_5_confidence.toFixed(1)}%</h4>
+                            <small class="text-muted">Over 5.5 Confidence</small>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="p-3 bg-light rounded">
+                            <h4 class="text-warning mb-0">${prediction.line_predictions.over_6_5_confidence.toFixed(1)}%</h4>
+                            <small class="text-muted">Over 6.5 Confidence</small>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- BTTS Predictions -->
+                ${prediction.goal_predictions ? `
+                <div class="row text-center mb-4">
+                    <div class="col-12">
+                        <h6 class="text-secondary mb-3"><i class="fas fa-futbol"></i> Goal Predictions (Both Teams To Score)</h6>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="p-3 bg-light rounded">
+                            <h4 class="text-info mb-0">${prediction.goal_predictions.btts.btts_probability.toFixed(1)}%</h4>
+                            <small class="text-muted">BTTS Probability</small>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="p-3 bg-light rounded">
+                            <h4 class="text-success mb-0">${prediction.goal_predictions.home_team_to_score.probability.toFixed(1)}%</h4>
+                            <small class="text-muted">${homeTeamName} to Score</small>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="p-3 bg-light rounded">
+                            <h4 class="text-warning mb-0">${prediction.goal_predictions.away_team_to_score.probability.toFixed(1)}%</h4>
+                            <small class="text-muted">${awayTeamName} to Score</small>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- BTTS Analysis -->
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <div class="card h-100">
+                            <div class="card-body text-center">
+                                <h6><i class="fas fa-futbol"></i> BTTS Recommendation</h6>
+                                <span class="badge bg-${getBttsRecommendationColor(prediction.goal_predictions.btts.btts_probability, prediction.goal_predictions.btts.confidence_score)} fs-6">
+                                    ${getBttsRecommendation(prediction.goal_predictions.btts.btts_probability, prediction.goal_predictions.btts.confidence_score)}
+                                </span>
+                                <p class="mt-2 mb-0 small text-muted">
+                                    ${prediction.goal_predictions.btts.confidence === 'High' || prediction.goal_predictions.btts.confidence === 'Very High' ? '✅ High confidence' : 
+                                      prediction.goal_predictions.btts.confidence === 'Medium' ? '⚡ Moderate confidence' : '⚠️ Low confidence'}
+                                    • ${prediction.goal_predictions.btts.data_quality || 'Standard'} data
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card h-100">
+                            <div class="card-body">
+                                <h6><i class="fas fa-brain"></i> Dynamic Analysis</h6>
+                                <div class="small">
+                                    <div class="mb-2">
+                                        <strong>🏠 ${homeTeamName}:</strong><br>
+                                        <span class="text-muted">${prediction.goal_predictions.home_team_to_score.reasoning}</span>
+                                    </div>
+                                    <div>
+                                        <strong>✈️ ${awayTeamName}:</strong><br>
+                                        <span class="text-muted">${prediction.goal_predictions.away_team_to_score.reasoning}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                ` : ''}
+                
+                <!-- Corner Recommendations -->
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <div class="card h-100">
+                            <div class="card-body text-center">
+                                <h6>Over 5.5 Corners</h6>
+                                <span class="badge bg-${prediction.line_predictions.over_5_5.recommendation === 'BET' ? 'success' : prediction.line_predictions.over_5_5.recommendation === 'AVOID' ? 'danger' : 'warning'} fs-6">
+                                    ${prediction.line_predictions.over_5_5.recommendation}
+                                </span>
+                                <p class="mt-2 mb-0 small text-muted">
+                                    ${prediction.line_predictions.over_5_5_confidence >= 70 ? '✅ High confidence' : 
+                                      prediction.line_predictions.over_5_5_confidence >= 50 ? '⚡ Moderate confidence' : '⚠️ Low confidence'}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card h-100">
+                            <div class="card-body text-center">
+                                <h6>Over 6.5 Corners</h6>
+                                <span class="badge bg-${prediction.line_predictions.over_6_5.recommendation === 'BET' ? 'success' : prediction.line_predictions.over_6_5.recommendation === 'AVOID' ? 'danger' : 'warning'} fs-6">
+                                    ${prediction.line_predictions.over_6_5.recommendation}
+                                </span>
+                                <p class="mt-2 mb-0 small text-muted">
+                                    ${prediction.line_predictions.over_6_5_confidence >= 70 ? '✅ High confidence' : 
+                                      prediction.line_predictions.over_6_5_confidence >= 50 ? '⚡ Moderate confidence' : '⚠️ Low confidence'}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Team Breakdown -->
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <div class="border-start border-primary border-3 ps-3">
+                            <h6><i class="fas fa-home"></i> ${homeTeamName}</h6>
+                            <p class="mb-1"><strong>Expected:</strong> ${prediction.predictions.predicted_home_corners.toFixed(1)} corners</p>
+                            <small class="text-muted">${prediction.team_analysis.home_team_form}</small>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="border-start border-secondary border-3 ps-3">
+                            <h6><i class="fas fa-plane"></i> ${awayTeamName}</h6>
+                            <p class="mb-1"><strong>Expected:</strong> ${prediction.predictions.predicted_away_corners.toFixed(1)} corners</p>
+                            <small class="text-muted">${prediction.team_analysis.away_team_form}</small>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Quality & Actions -->
+                <div class="row">
+                    <div class="col-md-8">
+                        <div class="d-flex align-items-center">
+                            <span class="badge bg-${prediction.web_display.reliability_badge} me-2">
+                                ${prediction.quality_metrics.data_reliability}
+                            </span>
+                            <small class="text-muted">
+                                ${prediction.quality_metrics.statistical_confidence.toFixed(1)}% statistical confidence
+                                • ${prediction.quality_metrics.prediction_quality} quality
+                            </small>
+                        </div>
+                    </div>
+                    <div class="col-md-4 text-end">
+                        <div class="prediction-actions mt-3">
+                            <div class="btn-group w-100" role="group">
+                                <a href="/analysis/${homeTeamId}/${awayTeamId}/${season}" 
+                                   class="btn btn-primary btn-sm">
+                                    <i class="fas fa-flag"></i> Full Corner Analysis
+                                </a>
+                                <a href="/analysis/goals/${homeTeamId}/${awayTeamId}/${season}" 
+                                   class="btn btn-success btn-sm">
+                                    <i class="fas fa-futbol"></i> Full Goal Analysis
+                                </a>
+                            </div>
+                            <div class="mt-2">
+                                <button class="btn btn-outline-secondary btn-sm" onclick="closePredictionResults()">
+                                    <i class="fas fa-times"></i> Close
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    predictionResultsArea.innerHTML = html;
+}
+
+// Navigation functions removed - using direct links for analysis pages
+
+// Close prediction results
+function closePredictionResults() {
+    const predictionResultsArea = document.getElementById('fixture-prediction-results');
+    if (predictionResultsArea) {
+        predictionResultsArea.style.display = 'none';
+        predictionResultsArea.innerHTML = '';
+    }
+}
+
+// Switch to custom analysis tab (fallback function)
+function switchToCustomAnalysis(homeTeamId, awayTeamId, homeTeamName, awayTeamName) {
+    const customTab = document.getElementById('custom-tab');
+    const customTabInstance = new bootstrap.Tab(customTab);
+    customTabInstance.show();
+    
+    setTimeout(() => {
+        const homeSelect = document.getElementById('home-team-select');
+        const awaySelect = document.getElementById('away-team-select');
+        
+        homeSelect.value = homeTeamId;
+        awaySelect.value = awayTeamId;
+        
+        document.getElementById('prediction-form').scrollIntoView({ behavior: 'smooth' });
+        
+        const form = document.getElementById('prediction-form');
+        form.style.border = '2px solid #007bff';
+        setTimeout(() => form.style.border = '', 2000);
+    }, 100);
+}
+
+// Load teams for selection dropdowns
+async function loadTeams() {
+    const homeSelect = document.getElementById('home-team-select');
+    const awaySelect = document.getElementById('away-team-select');
+    const seasonSelect = document.getElementById('season-select');
+    const selectedSeason = seasonSelect.value || 2025;
     
     try {
-        const response = await fetch('/api/fixtures');
-        const data = await response.json();
+        const response = await CSLPredictions.apiRequest(`/api/teams?season=${selectedSeason}`);
         
-        // Clear loading option
-        fixtureSelect.innerHTML = '<option value="">Choose a match...</option>';
-        
-        if (data.status === 'success' && data.data.length > 0) {
-            data.data.forEach(fixture => {
-                const option = document.createElement('option');
-                option.value = fixture.id;
+        if (response.status === 'success' && response.data.teams.length > 0) {
+            // Clear loading options
+            homeSelect.innerHTML = '<option value="">Choose home team...</option>';
+            awaySelect.innerHTML = '<option value="">Choose away team...</option>';
+            
+            response.data.teams.forEach(team => {
+                const homeOption = document.createElement('option');
+                homeOption.value = team.id;
+                homeOption.textContent = team.name;
+                homeSelect.appendChild(homeOption);
                 
-                const homeTeam = fixture.home_team.name;
-                const awayTeam = fixture.away_team.name;
-                const date = new Date(fixture.date).toLocaleDateString();
-                
-                option.textContent = `${homeTeam} vs ${awayTeam} (${date})`;
-                fixtureSelect.appendChild(option);
+                const awayOption = document.createElement('option');
+                awayOption.value = team.id;
+                awayOption.textContent = team.name;
+                awaySelect.appendChild(awayOption);
             });
             
-            predictBtn.disabled = false;
-            
-            // Update teams count in status
-            document.getElementById('teams-count').textContent = `${data.data.length} fixtures`;
+            CSLPredictions.debugLog(`Loaded ${response.data.teams.length} teams`);
         } else {
-            const option = document.createElement('option');
-            option.value = '';
-            option.textContent = 'No upcoming fixtures available';
-            option.disabled = true;
-            fixtureSelect.appendChild(option);
-            
-            predictBtn.disabled = true;
+            homeSelect.innerHTML = '<option value="">No teams available</option>';
+            awaySelect.innerHTML = '<option value="">No teams available</option>';
         }
     } catch (error) {
-        console.error('Failed to load fixtures:', error);
-        fixtureSelect.innerHTML = '<option value="">Error loading fixtures</option>';
-        predictBtn.disabled = true;
+        homeSelect.innerHTML = '<option value="">Error loading teams</option>';
+        awaySelect.innerHTML = '<option value="">Error loading teams</option>';
+        console.error('Failed to load teams:', error);
     }
 }
 
-// Handle form submission
-document.getElementById('prediction-form').addEventListener('submit', function(e) {
+// Load match suggestions (high-confidence opportunities)
+async function loadSuggestions() {
+    const suggestionsContainer = document.getElementById('match-suggestions');
+    
+    try {
+        const response = await CSLPredictions.apiRequest('/api/betting-opportunities?min_confidence=70&season=2024');
+        
+        if (response.status === 'success' && response.data.opportunities.length > 0) {
+            const opportunities = response.data.opportunities.slice(0, 3); // Show top 3
+            
+            let html = '<h6 class="mb-3">🎯 High-Confidence Opportunities</h6>';
+            opportunities.forEach(opp => {
+                html += `
+                    <div class="border rounded p-3 mb-2">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <strong>${opp.home_team} vs ${opp.away_team}</strong>
+                            <span class="badge bg-${opp.confidence >= 80 ? 'success' : 'warning'}">
+                                ${opp.confidence.toFixed(1)}% confidence
+                            </span>
+                        </div>
+                        <div class="mt-2">
+                            <small class="text-muted">
+                                <i class="fas fa-chart-line"></i> ${opp.predicted_total.toFixed(1)} total corners
+                                | <i class="fas fa-target"></i> ${opp.line} line
+                                | <i class="fas fa-trophy"></i> ${opp.recommendation}
+                            </small>
+                        </div>
+                        <button class="btn btn-sm btn-outline-primary mt-2" onclick="quickPredict(${opp.home_team_id}, ${opp.away_team_id})">
+                            <i class="fas fa-zap"></i> Quick Predict
+                        </button>
+                    </div>
+                `;
+            });
+            
+            suggestionsContainer.innerHTML = html;
+        } else {
+            suggestionsContainer.innerHTML = `
+                <div class="text-center text-muted">
+                    <i class="fas fa-search"></i>
+                    <p class="mt-2">No high-confidence opportunities found.<br>
+                    <small>Try generating predictions for specific matchups.</small></p>
+                </div>
+            `;
+        }
+    } catch (error) {
+        suggestionsContainer.innerHTML = `
+            <div class="alert alert-warning">
+                <i class="fas fa-exclamation-triangle"></i>
+                Failed to load suggestions. <a href="javascript:loadSuggestions()">Try again</a>
+            </div>
+        `;
+        console.error('Failed to load suggestions:', error);
+    }
+}
+
+// Load system performance metrics
+async function loadPerformance() {
+    const performanceContainer = document.getElementById('system-performance');
+    
+    try {
+        const response = await CSLPredictions.apiRequest('/api/accuracy');
+        
+        if (response.status === 'success') {
+            const data = response.data;
+            
+            const html = `
+                <div class="row text-center">
+                    <div class="col-6">
+                        <div class="border-end">
+                            <h4 class="text-primary">${data.total_predictions || 0}</h4>
+                            <small class="text-muted">Total Predictions</small>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <h4 class="text-success">${(data.overall_accuracy || 0).toFixed(1)}%</h4>
+                        <small class="text-muted">Overall Accuracy</small>
+                    </div>
+                </div>
+                <hr>
+                <div class="row text-center">
+                    <div class="col-6">
+                        <div class="border-end">
+                            <h5 class="text-info">${(data.over_5_5_accuracy || 0).toFixed(1)}%</h5>
+                            <small class="text-muted">Over 5.5 Line</small>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <h5 class="text-warning">${(data.over_6_5_accuracy || 0).toFixed(1)}%</h5>
+                        <small class="text-muted">Over 6.5 Line</small>
+                    </div>
+                </div>
+            `;
+            
+            performanceContainer.innerHTML = html;
+        } else {
+            performanceContainer.innerHTML = `
+                <div class="text-center text-muted">
+                    <i class="fas fa-chart-bar"></i>
+                    <p class="mt-2">No performance data available yet.</p>
+                </div>
+            `;
+        }
+    } catch (error) {
+        performanceContainer.innerHTML = `
+            <div class="alert alert-warning">
+                <i class="fas fa-exclamation-triangle"></i>
+                Failed to load performance data.
+            </div>
+        `;
+        console.error('Failed to load performance:', error);
+    }
+}
+
+// Load recent predictions
+async function loadRecentPredictions() {
+    const recentContainer = document.getElementById('recent-predictions');
+    
+    try {
+        const response = await CSLPredictions.apiRequest('/api/unverified-predictions?season=2024');
+        
+        if (response.status === 'success' && response.data.unverified_predictions.length > 0) {
+            const predictions = response.data.unverified_predictions.slice(0, 3); // Show latest 3
+            
+            let html = '';
+            predictions.forEach(pred => {
+                html += `
+                    <div class="border-bottom pb-2 mb-2">
+                        <div class="d-flex justify-content-between">
+                            <small><strong>Prediction #${pred.id}</strong></small>
+                            <small class="text-muted">${new Date(pred.prediction_date).toLocaleDateString()}</small>
+                        </div>
+                        <div class="mt-1">
+                            <small class="text-muted">
+                                ${pred.predictions.total_corners.toFixed(1)} total corners
+                                | Over 5.5: ${pred.confidence.over_5_5.toFixed(1)}%
+                                | Quality: ${pred.quality.prediction_quality}
+                            </small>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            recentContainer.innerHTML = html;
+        } else {
+            recentContainer.innerHTML = `
+                <div class="text-center text-muted">
+                    <i class="fas fa-history"></i>
+                    <p class="mt-2">No recent predictions.<br>
+                    <small>Generate your first prediction above!</small></p>
+                </div>
+            `;
+        }
+    } catch (error) {
+        recentContainer.innerHTML = `
+            <div class="alert alert-warning">
+                <i class="fas fa-exclamation-triangle"></i>
+                Failed to load recent predictions.
+            </div>
+        `;
+        console.error('Failed to load recent predictions:', error);
+    }
+}
+
+// Quick predict function for suggestions
+function quickPredict(homeTeamId, awayTeamId) {
+    document.getElementById('home-team-select').value = homeTeamId;
+    document.getElementById('away-team-select').value = awayTeamId;
+    
+    // Scroll to form
+    document.getElementById('prediction-form').scrollIntoView({ behavior: 'smooth' });
+    
+    // Highlight the form briefly
+    const form = document.getElementById('prediction-form');
+    form.style.border = '2px solid #007bff';
+    setTimeout(() => {
+        form.style.border = '';
+    }, 2000);
+}
+
+// Show methodology modal
+function showMethodologyModal() {
+    const modal = new bootstrap.Modal(document.getElementById('methodologyModal'));
+    modal.show();
+}
+
+// Handle form submission for predictions
+document.getElementById('prediction-form').addEventListener('submit', async function(e) {
     e.preventDefault();
     
-    const fixtureId = document.getElementById('fixture-select').value;
-    if (!fixtureId) {
-        alert('Please select a match first!');
+    const homeTeamId = document.getElementById('home-team-select').value;
+    const awayTeamId = document.getElementById('away-team-select').value;
+    const season = document.getElementById('season-select').value;
+    
+    // Validation
+    if (!homeTeamId || !awayTeamId) {
+        CSLPredictions.showAlert('Please select both home and away teams.', 'warning', 3000);
         return;
     }
     
-    // Show that prediction functionality is coming in Phase 2
-    const selectedOption = document.getElementById('fixture-select').selectedOptions[0];
-    const matchName = selectedOption.textContent;
+    if (homeTeamId === awayTeamId) {
+        CSLPredictions.showAlert('Home and away teams must be different.', 'warning', 3000);
+        return;
+    }
     
-    CSLPredictions.showAlert(
-        `Prediction for "${matchName}" will be available in Phase 2! 🚀<br>` +
-        `<small>The system will analyze historical corner data and generate predictions with confidence levels.</small>`,
-        'info',
-        5000
-    );
+    const form = document.getElementById('prediction-form');
+    const resultsDiv = document.getElementById('prediction-results');
+    const resultsContent = document.getElementById('results-content');
+    
+    // Show loading
+    CSLPredictions.showLoading(form);
+    resultsDiv.style.display = 'none';
+    
+    try {
+        const response = await CSLPredictions.apiRequest('/api/predict', {
+            method: 'POST',
+            body: JSON.stringify({
+                home_team_id: parseInt(homeTeamId),
+                away_team_id: parseInt(awayTeamId),
+                season: parseInt(season)
+            })
+        });
+        
+        if (response.status === 'success') {
+            displayPredictionResults(response.data);
+            resultsDiv.style.display = 'block';
+            
+            // Scroll to results
+            resultsDiv.scrollIntoView({ behavior: 'smooth' });
+            
+            // Refresh recent predictions
+            loadRecentPredictions();
+            
+            CSLPredictions.showAlert('Prediction generated successfully!', 'success', 3000);
+        } else {
+            CSLPredictions.showAlert(`Prediction failed: ${response.message}`, 'danger', 5000);
+        }
+    } catch (error) {
+        CSLPredictions.showAlert('Failed to generate prediction. Please try again.', 'danger', 5000);
+        console.error('Prediction error:', error);
+    } finally {
+        CSLPredictions.hideLoading(form);
+    }
 });
+
+// Display prediction results in a comprehensive format
+function displayPredictionResults(prediction) {
+    const resultsContent = document.getElementById('results-content');
+    
+    const html = `
+        <!-- Match Header -->
+        <div class="prediction-card text-center mb-4">
+            <h4 class="mb-3">
+                <i class="fas fa-futbol"></i>
+                ${prediction.match_info.home_team} vs ${prediction.match_info.away_team}
+            </h4>
+            <div class="row">
+                <div class="col-md-4">
+                    <h2 class="mb-0">${prediction.predictions.predicted_total_corners.toFixed(1)}</h2>
+                    <small>Predicted Total Corners</small>
+                </div>
+                <div class="col-md-4">
+                    <h3 class="mb-0">${prediction.predictions.expected_total_range[0].toFixed(1)} - ${prediction.predictions.expected_total_range[1].toFixed(1)}</h3>
+                    <small>Expected Range</small>
+                </div>
+                <div class="col-md-4">
+                    <h3 class="mb-0">${prediction.quality_metrics.prediction_quality}</h3>
+                    <small>Prediction Quality</small>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Line Predictions -->
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h5 class="card-title">Over 5.5 Corners</h5>
+                        <h2 class="text-${prediction.web_display.confidence_color_5_5}">
+                            ${prediction.line_predictions.over_5_5_confidence.toFixed(1)}%
+                        </h2>
+                        <p class="card-text">
+                            <span class="badge bg-${prediction.line_predictions.over_5_5.recommendation === 'BET' ? 'success' : prediction.line_predictions.over_5_5.recommendation === 'AVOID' ? 'danger' : 'warning'}">
+                                ${prediction.line_predictions.over_5_5.recommendation}
+                            </span>
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h5 class="card-title">Over 6.5 Corners</h5>
+                        <h2 class="text-${prediction.web_display.confidence_color_6_5}">
+                            ${prediction.line_predictions.over_6_5_confidence.toFixed(1)}%
+                        </h2>
+                        <p class="card-text">
+                            <span class="badge bg-${prediction.line_predictions.over_6_5.recommendation === 'BET' ? 'success' : prediction.line_predictions.over_6_5.recommendation === 'AVOID' ? 'danger' : 'warning'}">
+                                ${prediction.line_predictions.over_6_5.recommendation}
+                            </span>
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h5 class="card-title">Over 7.5 Corners</h5>
+                        <h2 class="text-${prediction.line_predictions.over_7_5_confidence >= 70 ? 'success' : prediction.line_predictions.over_7_5_confidence >= 50 ? 'warning' : 'danger'}">
+                            ${prediction.line_predictions.over_7_5_confidence.toFixed(1)}%
+                        </h2>
+                        <p class="card-text">
+                            <span class="badge bg-${prediction.line_predictions.over_7_5.recommendation === 'BET' ? 'success' : prediction.line_predictions.over_7_5.recommendation === 'AVOID' ? 'danger' : 'warning'}">
+                                ${prediction.line_predictions.over_7_5.recommendation}
+                            </span>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Team Analysis -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="team-stats">
+                    <h6><i class="fas fa-home"></i> ${prediction.match_info.home_team}</h6>
+                    <p><strong>Expected Corners:</strong> ${prediction.predictions.predicted_home_corners.toFixed(1)}</p>
+                    <p><strong>Recent Form:</strong> ${prediction.team_analysis.home_team_form}</p>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="team-stats">
+                    <h6><i class="fas fa-plane"></i> ${prediction.match_info.away_team}</h6>
+                    <p><strong>Expected Corners:</strong> ${prediction.predictions.predicted_away_corners.toFixed(1)}</p>
+                    <p><strong>Recent Form:</strong> ${prediction.team_analysis.away_team_form}</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Quality Metrics -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h6 class="mb-0"><i class="fas fa-cogs"></i> Analysis Quality</h6>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3 text-center">
+                        <strong>Statistical Confidence</strong><br>
+                        <span class="h4 text-primary">${prediction.quality_metrics.statistical_confidence.toFixed(1)}%</span>
+                    </div>
+                    <div class="col-md-3 text-center">
+                        <strong>Data Reliability</strong><br>
+                        <span class="badge bg-${prediction.web_display.reliability_badge}">${prediction.quality_metrics.data_reliability}</span>
+                    </div>
+                    <div class="col-md-3 text-center">
+                        <strong>Consistency Score</strong><br>
+                        <span class="h4 text-info">${prediction.quality_metrics.consistency_score.toFixed(1)}%</span>
+                    </div>
+                    <div class="col-md-3 text-center">
+                        <strong>Most Likely</strong><br>
+                        <span class="badge bg-secondary">${prediction.predictions.most_likely_outcome}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Analysis Summary -->
+        <div class="card">
+            <div class="card-header">
+                <h6 class="mb-0"><i class="fas fa-lightbulb"></i> Analysis Summary</h6>
+            </div>
+            <div class="card-body">
+                <p><strong>Recommendation:</strong> ${prediction.analysis.recommendation}</p>
+                <p><strong>Methodology:</strong> ${prediction.analysis.methodology}</p>
+                <details>
+                    <summary class="text-primary" style="cursor: pointer;">View Detailed Analysis</summary>
+                    <div class="mt-3 p-3 bg-light rounded">
+                        <pre style="white-space: pre-wrap; font-size: 0.9em;">${prediction.analysis.summary}</pre>
+                    </div>
+                </details>
+            </div>
+        </div>
+        
+        <!-- Analysis Actions -->
+        <div class="row mt-4">
+            <div class="col-12 text-center">
+                <div class="prediction-actions">
+                    <div class="btn-group w-100" role="group">
+                        <a href="/analysis/${prediction.match_info.home_team_id}/${prediction.match_info.away_team_id}/${prediction.match_info.season}" 
+                           class="btn btn-primary btn-sm">
+                            <i class="fas fa-flag"></i> Full Corner Analysis
+                        </a>
+                        <a href="/analysis/goals/${prediction.match_info.home_team_id}/${prediction.match_info.away_team_id}/${prediction.match_info.season}" 
+                           class="btn btn-success btn-sm">
+                            <i class="fas fa-futbol"></i> Full Goal Analysis
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    resultsContent.innerHTML = html;
+}
 </script>
 {% endblock %}

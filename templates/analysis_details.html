@@ -1,0 +1,993 @@
+{% extends "base.html" %}
+
+{% block title %}{% if analysis_type == 'goals' %}Goal Analysis{% else %}Corner Analysis{% endif %} - {{ home_team.name }} vs {{ away_team.name }}{% endblock %}
+
+{% block extra_css %}
+<style>
+.analysis-page {
+    background-color: #f8f9fa;
+}
+
+.analysis-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 12px;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    color: white;
+}
+
+.team-analysis-card {
+    border-radius: 12px;
+    box-shadow: 0 0.25rem 0.5rem rgba(0, 0, 0, 0.1);
+}
+
+.team-analysis-card .card-header {
+    border-radius: 12px 12px 0 0;
+    font-weight: 600;
+}
+
+.matches-table {
+    font-size: 0.9rem;
+}
+
+.matches-table th {
+    background-color: #f8f9fa;
+    font-weight: 600;
+    border-top: none;
+}
+
+.methodology-section {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: 10px;
+    padding: 1.5rem;
+}
+
+.chart-container {
+    position: relative;
+    height: 250px;
+    margin-top: 1rem;
+}
+
+@media (max-width: 768px) {
+    .analysis-header {
+        padding: 1rem;
+    }
+    
+    .team-analysis-card {
+        margin-bottom: 1rem;
+    }
+    
+    .matches-table {
+        font-size: 0.8rem;
+    }
+    
+    .chart-container {
+        height: 200px;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid analysis-page">
+    <!-- Error handling -->
+    {% if not analysis %}
+    <div class="alert alert-warning" role="alert">
+        <h4 class="alert-heading">Analysis Unavailable</h4>
+        <p>{{ error_message or "Unable to generate corner analysis for this match." }}</p>
+        <hr>
+        <p class="mb-0">This may be due to insufficient historical data for the selected time period.</p>
+    </div>
+    <div class="text-center">
+        <a href="/" class="btn btn-primary">Return to Dashboard</a>
+    </div>
+    {% else %}
+    <!-- Time-Travel Mode Indicator -->
+    {% if request.args.get('backtest_date') %}
+    <div class="alert alert-info border-0 mb-3" style="background: linear-gradient(135deg, #17a2b8, #138496); color: white;">
+        <div class="d-flex align-items-center">
+            <i class="fas fa-history me-2"></i>
+            <div>
+                <strong>🕒 Time-Travel Mode</strong> - Historical Analysis Only
+                <small class="d-block opacity-75">Data cutoff: {{ request.args.get('backtest_date') }} (no future data included)</small>
+            </div>
+        </div>
+    </div>
+    
+    <div class="alert alert-warning border-0 mb-3">
+        <div class="d-flex align-items-center">
+            <i class="fas fa-info-circle me-2"></i>
+            <div>
+                <strong>📊 Confidence Score Note:</strong> For accurate confidence scores in backtesting mode, refer to the <strong>backtesting table</strong> values. 
+                These detail pages show historical analysis patterns but may contain template placeholder values.
+                <small class="d-block mt-1"><strong>Authoritative source:</strong> Backtesting table confidence scores (calculated by prediction engine)</small>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+    
+    <!-- Page Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="analysis-header">
+                <div class="d-flex justify-content-between align-items-center flex-wrap">
+                    <div>
+                        <h2 class="mb-2">
+                            <i class="fas fa-microscope"></i> 
+                            Corner Analysis: {{ home_team.name }} vs {{ away_team.name }}
+                        </h2>
+                        <p class="mb-0 opacity-75">{{ season }} Season - Comprehensive Corner Prediction Breakdown</p>
+                    </div>
+                    <div class="analysis-navigation">
+                        <nav aria-label="Analysis navigation">
+                            <div class="btn-group" role="group">
+                                <a href="/" class="btn btn-outline-primary">
+                                    <i class="fas fa-home"></i> Dashboard
+                                </a>
+                                <a href="{{ url_for('analysis_details', home_team_id=home_team.id, away_team_id=away_team.id, season=season, backtest_date=request.args.get('backtest_date')) if request.args.get('backtest_date') else url_for('analysis_details', home_team_id=home_team.id, away_team_id=away_team.id, season=season) }}" 
+                                   class="btn btn-outline-info">
+                                    <i class="fas fa-flag"></i> Corner Analysis
+                                </a>
+                                <a href="{{ url_for('goal_analysis_details', home_team_id=home_team.id, away_team_id=away_team.id, season=season, backtest_date=request.args.get('backtest_date')) if request.args.get('backtest_date') else url_for('goal_analysis_details', home_team_id=home_team.id, away_team_id=away_team.id, season=season) }}" 
+                                   class="btn btn-outline-success">
+                                    <i class="fas fa-futbol"></i> Goal Analysis
+                                </a>
+                            </div>
+                        </nav>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Prediction Summary -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0"><i class="fas fa-target"></i> Prediction Summary</h4>
+                </div>
+                <div class="card-body">
+                    <div class="row text-center">
+                        <div class="col-md-3 mb-3">
+                            <div class="p-3 bg-light rounded">
+                                <h3 class="text-primary mb-0">{{ "%.1f"|format(analysis['prediction']['predictions']['predicted_total_corners']) }}</h3>
+                                <small class="text-muted">Total Corners</small>
+                            </div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <div class="p-3 bg-light rounded">
+                                <h4 class="text-success mb-0">{{ "%.1f"|format(analysis['calculation_breakdown']['confidence_calculations']['over_5_5']['calculated_confidence']) }}%</h4>
+                                <small class="text-muted">Over 5.5 Confidence</small>
+                            </div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <div class="p-3 bg-light rounded">
+                                <h4 class="text-warning mb-0">{{ "%.1f"|format(analysis['calculation_breakdown']['confidence_calculations']['over_6_5']['calculated_confidence']) }}%</h4>
+                                <small class="text-muted">Over 6.5 Confidence</small>
+                            </div>
+                        </div>
+                        <div class="col-md-3 mb-3">
+                            <div class="p-3 bg-light rounded text-center">
+                                <span class="badge bg-info fs-6 mb-2">
+                                    {{ analysis['prediction']['quality_metrics']['data_reliability'] }}
+                                </span>
+                                <br><small class="text-muted">Data Quality</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Team Analysis Sections -->
+    <div class="row">
+        <!-- Home Team Analysis -->
+        <div class="col-lg-6 mb-4">
+            <div class="card team-analysis-card h-100">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0"><i class="fas fa-home"></i> {{ home_team.name }} Analysis</h5>
+                </div>
+                <div class="card-body">
+                    <!-- Team Summary -->
+                    <div class="mb-4">
+                        <h6 class="text-primary">Performance Summary</h6>
+                        <div class="row">
+                            <div class="col-sm-6">
+                                <p class="mb-2"><strong>Expected Corners:</strong> <span class="text-primary">{{ "%.1f"|format(analysis['prediction']['predictions']['predicted_home_corners']) }}</span></p>
+                                <p class="mb-2"><strong>Form:</strong> {{ analysis['prediction']['home_team_form'] }}</p>
+                            </div>
+                            <div class="col-sm-6">
+                                <p class="mb-2"><strong>Consistency:</strong> <span class="text-info">{{ "%.1f"|format(analysis['calculation_breakdown']['confidence_calculations']['over_5_5']['consistency_details']['overall_consistency']) }}%</span></p>
+                                <p class="mb-2"><strong>Matches:</strong> {{ analysis['home_team']['consistency']['matches_count'] }} ({{ analysis['home_team']['consistency']['home_matches'] }}H, {{ analysis['home_team']['consistency']['away_matches'] }}A)</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Enhanced Performance Statistics -->
+                        <div class="row mt-3">
+                            <div class="col-12">
+                                <div class="border-top pt-3">
+                                    <h6 class="text-primary mb-3">Line Performance History</h6>
+                                    <div class="row">
+                                        <div class="col-md-4">
+                                            <p class="mb-2"><strong>Over 5.5:</strong> <span class="text-success">{{ "%.1f"|format(analysis['home_team']['consistency']['over_5_5_rate']) }}%</span> ({{ analysis['home_team']['consistency']['over_5_5_count'] }}/{{ analysis['home_team']['consistency']['matches_count'] }})</p>
+                                            <small class="text-muted">Home: {{ "%.1f"|format(analysis['home_team']['consistency']['over_5_5_home_rate']) }}% | Away: {{ "%.1f"|format(analysis['home_team']['consistency']['over_5_5_away_rate']) }}%</small>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <p class="mb-2"><strong>Over 6.5:</strong> <span class="text-warning">{{ "%.1f"|format(analysis['home_team']['consistency']['over_6_5_rate']) }}%</span> ({{ analysis['home_team']['consistency']['over_6_5_count'] }}/{{ analysis['home_team']['consistency']['matches_count'] }})</p>
+                                            <small class="text-muted">Home: {{ "%.1f"|format(analysis['home_team']['consistency']['over_6_5_home_rate']) }}% | Away: {{ "%.1f"|format(analysis['home_team']['consistency']['over_6_5_away_rate']) }}%</small>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <p class="mb-2"><strong>Beats Prediction:</strong> <span class="text-info">{{ "%.1f"|format(analysis['home_team']['consistency']['beats_prediction_rate']) }}%</span> ({{ analysis['home_team']['consistency']['beats_prediction_count'] }}/{{ analysis['home_team']['consistency']['matches_count'] }})</p>
+                                            <small class="text-muted">Home: {{ "%.1f"|format(analysis['home_team']['consistency']['beats_prediction_home_rate']) }}% | Away: {{ "%.1f"|format(analysis['home_team']['consistency']['beats_prediction_away_rate']) }}%</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Recent Matches Table -->
+                    <h6 class="text-primary">Recent Matches (Corner Statistics)</h6>
+                    <div class="table-responsive mb-3">
+                        <table class="table table-sm matches-table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Opponent</th>
+                                    <th>Won</th>
+                                    <th>Conceded</th>
+                                    <th>Total</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for match in analysis['home_team']['matches'][:10] %}
+                                <tr>
+                                    <td>{{ match.match_date.split('T')[0] if match.match_date else 'N/A' }}</td>
+                                    <td>
+                                        {% if match.home_team_id == home_team.id %}
+                                            {{ match.away_team_name or 'Unknown' }}
+                                        {% else %}
+                                            {{ match.home_team_name or 'Unknown' }}
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-success">
+                                        {% if match.home_team_id == home_team.id %}
+                                            {{ match.corners_home or 0 }}
+                                        {% else %}
+                                            {{ match.corners_away or 0 }}
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-danger">
+                                        {% if match.home_team_id == home_team.id %}
+                                            {{ match.corners_away or 0 }}
+                                        {% else %}
+                                            {{ match.corners_home or 0 }}
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-primary">{{ (match.corners_home or 0) + (match.corners_away or 0) }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Chart Container -->
+                    <div class="chart-container">
+                        <canvas id="homeTeamChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Away Team Analysis -->
+        <div class="col-lg-6 mb-4">
+            <div class="card team-analysis-card h-100">
+                <div class="card-header bg-secondary text-white">
+                    <h5 class="mb-0"><i class="fas fa-plane"></i> {{ away_team.name }} Analysis</h5>
+                </div>
+                <div class="card-body">
+                    <!-- Team Summary -->
+                    <div class="mb-4">
+                        <h6 class="text-secondary">Performance Summary</h6>
+                        <div class="row">
+                            <div class="col-sm-6">
+                                <p class="mb-2"><strong>Expected Corners:</strong> <span class="text-primary">{{ "%.1f"|format(analysis['prediction']['predictions']['predicted_away_corners']) }}</span></p>
+                                <p class="mb-2"><strong>Form:</strong> {{ analysis['prediction']['away_team_form'] }}</p>
+                            </div>
+                            <div class="col-sm-6">
+                                <p class="mb-2"><strong>Consistency:</strong> <span class="text-info">{{ "%.1f"|format(analysis['calculation_breakdown']['confidence_calculations']['over_5_5']['consistency_details']['overall_consistency']) }}%</span></p>
+                                <p class="mb-2"><strong>Matches:</strong> {{ analysis['away_team']['consistency']['matches_count'] }} ({{ analysis['away_team']['consistency']['home_matches'] }}H, {{ analysis['away_team']['consistency']['away_matches'] }}A)</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Enhanced Performance Statistics -->
+                        <div class="row mt-3">
+                            <div class="col-12">
+                                <div class="border-top pt-3">
+                                    <h6 class="text-secondary mb-3">Line Performance History</h6>
+                                    <div class="row">
+                                        <div class="col-md-4">
+                                            <p class="mb-2"><strong>Over 5.5:</strong> <span class="text-success">{{ "%.1f"|format(analysis['away_team']['consistency']['over_5_5_rate']) }}%</span> ({{ analysis['away_team']['consistency']['over_5_5_count'] }}/{{ analysis['away_team']['consistency']['matches_count'] }})</p>
+                                            <small class="text-muted">Home: {{ "%.1f"|format(analysis['away_team']['consistency']['over_5_5_home_rate']) }}% | Away: {{ "%.1f"|format(analysis['away_team']['consistency']['over_5_5_away_rate']) }}%</small>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <p class="mb-2"><strong>Over 6.5:</strong> <span class="text-warning">{{ "%.1f"|format(analysis['away_team']['consistency']['over_6_5_rate']) }}%</span> ({{ analysis['away_team']['consistency']['over_6_5_count'] }}/{{ analysis['away_team']['consistency']['matches_count'] }})</p>
+                                            <small class="text-muted">Home: {{ "%.1f"|format(analysis['away_team']['consistency']['over_6_5_home_rate']) }}% | Away: {{ "%.1f"|format(analysis['away_team']['consistency']['over_6_5_away_rate']) }}%</small>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <p class="mb-2"><strong>Beats Prediction:</strong> <span class="text-info">{{ "%.1f"|format(analysis['away_team']['consistency']['beats_prediction_rate']) }}%</span> ({{ analysis['away_team']['consistency']['beats_prediction_count'] }}/{{ analysis['away_team']['consistency']['matches_count'] }})</p>
+                                            <small class="text-muted">Home: {{ "%.1f"|format(analysis['away_team']['consistency']['beats_prediction_home_rate']) }}% | Away: {{ "%.1f"|format(analysis['away_team']['consistency']['beats_prediction_away_rate']) }}%</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Recent Matches Table -->
+                    <h6 class="text-secondary">Recent Matches (Corner Statistics)</h6>
+                    <div class="table-responsive mb-3">
+                        <table class="table table-sm matches-table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Opponent</th>
+                                    <th>Won</th>
+                                    <th>Conceded</th>
+                                    <th>Total</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for match in analysis['away_team']['matches'][:10] %}
+                                <tr>
+                                    <td>{{ match.match_date.split('T')[0] if match.match_date else 'N/A' }}</td>
+                                    <td>
+                                        {% if match.away_team_id == away_team.id %}
+                                            {{ match.home_team_name or 'Unknown' }}
+                                        {% else %}
+                                            {{ match.away_team_name or 'Unknown' }}
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-success">
+                                        {% if match.away_team_id == away_team.id %}
+                                            {{ match.corners_away or 0 }}
+                                        {% else %}
+                                            {{ match.corners_home or 0 }}
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-danger">
+                                        {% if match.away_team_id == away_team.id %}
+                                            {{ match.corners_home or 0 }}
+                                        {% else %}
+                                            {{ match.corners_away or 0 }}
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-primary">{{ (match.corners_home or 0) + (match.corners_away or 0) }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Chart Container -->
+                    <div class="chart-container">
+                        <canvas id="awayTeamChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Calculation Breakdown -->
+    {% if analysis['calculation_breakdown'] %}
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0"><i class="fas fa-calculator"></i> Calculation Breakdown</h4>
+                    <small>Complete transparency of how predictions are calculated</small>
+                </div>
+                <div class="card-body">
+                    <!-- Prediction Summary -->
+                    <div class="row mb-4">
+                        <div class="col-12">
+                            <h5 class="text-primary mb-3">🎯 Final Predictions</h5>
+                            <div class="row">
+                                <div class="col-md-4 text-center">
+                                    <div class="bg-light p-3 rounded">
+                                        <h6>{{ home_team.name }}</h6>
+                                        <h4 class="text-primary">{{ "%.1f"|format(analysis['calculation_breakdown']['prediction_summary']['home_predicted']) }}</h4>
+                                        <small>Expected Corners</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-4 text-center">
+                                    <div class="bg-light p-3 rounded">
+                                        <h6>{{ away_team.name }}</h6>
+                                        <h4 class="text-secondary">{{ "%.1f"|format(analysis['calculation_breakdown']['prediction_summary']['away_predicted']) }}</h4>
+                                        <small>Expected Corners</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-4 text-center">
+                                    <div class="bg-warning p-3 rounded">
+                                        <h6>Match Total</h6>
+                                        <h4 class="text-dark">{{ "%.1f"|format(analysis['calculation_breakdown']['prediction_summary']['total_predicted']) }}</h4>
+                                        <small>Expected Total</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Raw Data Analysis -->
+                    <div class="row mb-4">
+                        <div class="col-lg-6">
+                            <h5 class="text-primary mb-3">🏠 {{ home_team.name }} - Raw Data</h5>
+                            <div class="mb-3">
+                                <strong>Corner Values (Last {{ analysis['calculation_breakdown']['home_team']['matches_count'] }} Games):</strong>
+                                <div class="mt-2">
+                                    <code class="bg-light p-2 d-block">{{ analysis['calculation_breakdown']['home_team']['corners_won_list'] | join(', ') }}</code>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <strong>Raw Average Calculation:</strong>
+                                <div class="mt-1">
+                                    <code>({{ analysis['calculation_breakdown']['home_team']['raw_sum_won'] }}) ÷ {{ analysis['calculation_breakdown']['home_team']['matches_count'] }} = {{ analysis['calculation_breakdown']['home_team']['raw_average_won'] }}</code>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <strong>Weighted Average:</strong> {{ analysis['calculation_breakdown']['home_team']['weighted_average_won'] }}
+                                <br><small class="text-muted">Recent games weighted higher using exponential decay</small>
+                            </div>
+                        </div>
+                        <div class="col-lg-6">
+                            <h5 class="text-secondary mb-3">✈️ {{ away_team.name }} - Raw Data</h5>
+                            <div class="mb-3">
+                                <strong>Corner Values (Last {{ analysis['calculation_breakdown']['away_team']['matches_count'] }} Games):</strong>
+                                <div class="mt-2">
+                                    <code class="bg-light p-2 d-block">{{ analysis['calculation_breakdown']['away_team']['corners_won_list'] | join(', ') }}</code>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <strong>Raw Average Calculation:</strong>
+                                <div class="mt-1">
+                                    <code>({{ analysis['calculation_breakdown']['away_team']['raw_sum_won'] }}) ÷ {{ analysis['calculation_breakdown']['away_team']['matches_count'] }} = {{ analysis['calculation_breakdown']['away_team']['raw_average_won'] }}</code>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <strong>Weighted Average:</strong> {{ analysis['calculation_breakdown']['away_team']['weighted_average_won'] }}
+                                <br><small class="text-muted">Recent games weighted higher using exponential decay</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Weighting Formula Explanation -->
+                    <div class="row mb-4">
+                        <div class="col-12">
+                            <h5 class="text-info mb-3">⚖️ Weighting Formula</h5>
+                            <div class="bg-light p-3 rounded">
+                                <p class="mb-2"><strong>Time-based Formula:</strong> <code>{{ analysis['calculation_breakdown']['weighting_details']['formula'] }}</code></p>
+                                <p class="mb-2"><strong>Venue-based Formula:</strong> <code>Combined Weight = Time Weight × Venue Weight</code></p>
+                                <p class="mb-3"><small>Where position = games ago (0 for most recent), venue weight = 1.3 for relevant venue, 1.0 for other venue</small></p>
+                                <div class="row">
+                                    {% for example in analysis['calculation_breakdown']['weighting_details']['examples'] %}
+                                    <div class="col-md-3 mb-2">
+                                        <strong>Game {{ example.position }}:</strong> {{ example.weight }}<br>
+                                        <small class="text-muted">{{ example.description }}</small>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                                <div class="mt-3 pt-2 border-top">
+                                    <small class="text-info">
+                                        <strong>🏠 Venue Weighting Logic:</strong><br>
+                                        • Home team analysis: Home games get 1.3× weight, away games get 1.0× weight<br>
+                                        • Away team analysis: Away games get 1.3× weight, home games get 1.0× weight<br>
+                                        • Minimum 3 games at relevant venue required for venue weighting<br>
+                                        • Falls back to equal weighting if insufficient comprehensive data
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Detailed Weighting Breakdown (First 10 Games) -->
+                    <div class="row mb-4">
+                        <div class="col-lg-6">
+                            <h6 class="text-primary">🏠 {{ home_team.name }} - Weighting Details</h6>
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Game</th>
+                                            <th>Corners</th>
+                                            <th>Weight</th>
+                                            <th>Contribution</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for detail in analysis['calculation_breakdown']['home_team']['weighting_breakdown'] %}
+                                        <tr>
+                                            <td>{{ detail.game }}</td>
+                                            <td>{{ detail.corners_won }}</td>
+                                            <td>{{ detail.weight }}</td>
+                                            <td>{{ detail.contribution_won }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="col-lg-6">
+                            <h6 class="text-secondary">✈️ {{ away_team.name }} - Weighting Details</h6>
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Game</th>
+                                            <th>Corners</th>
+                                            <th>Weight</th>
+                                            <th>Contribution</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for detail in analysis['calculation_breakdown']['away_team']['weighting_breakdown'] %}
+                                        <tr>
+                                            <td>{{ detail.game }}</td>
+                                            <td>{{ detail.corners_won }}</td>
+                                            <td>{{ detail.weight }}</td>
+                                            <td>{{ detail.contribution_won }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Line Performance Visual -->
+                    <div class="row mb-4">
+                        <div class="col-lg-6">
+                            <h6 class="text-primary">🏠 Over 5.5 Performance (Last 15 Games)</h6>
+                            <div class="mb-2">
+                                <span style="font-family: monospace; font-size: 1.2em;">
+                                    {{ analysis['calculation_breakdown']['home_team']['line_performance_visual'] | join('') }}
+                                </span>
+                            </div>
+                            <small class="text-muted">✅ = Over 5.5 corners, ❌ = Under 5.5 corners</small>
+                        </div>
+                        <div class="col-lg-6">
+                            <h6 class="text-secondary">✈️ Over 5.5 Performance (Last 15 Games)</h6>
+                            <div class="mb-2">
+                                <span style="font-family: monospace; font-size: 1.2em;">
+                                    {{ analysis['calculation_breakdown']['away_team']['line_performance_visual'] | join('') }}
+                                </span>
+                            </div>
+                            <small class="text-muted">✅ = Over 5.5 corners, ❌ = Under 5.5 corners</small>
+                        </div>
+                    </div>
+
+                    <!-- Confidence Calculations -->
+                    {% if analysis['calculation_breakdown']['confidence_calculations'] %}
+                    <div class="row">
+                        <div class="col-12">
+                            <h5 class="text-success mb-3">🎯 Confidence Calculations</h5>
+                            <div class="border-top pt-3">
+                                {% for line_key, line_data in analysis['calculation_breakdown']['confidence_calculations']['items']() %}
+                                <div class="mb-4">
+                                    <h6 class="text-info mb-3">Over {{ line_data.line_value }} Line Confidence</h6>
+                                    <div class="bg-light p-3 rounded">
+                                        <div class="row">
+                                            <div class="col-md-6">
+                                                <div class="mb-2">
+                                                    <strong>🏠 Home Team Performance:</strong>
+                                                    <code>{{ line_data.home_team.percentage_display }}</code>
+                                                    {% if line_data.home_team.venue_weighting_applied %}
+                                                    <br><small class="text-success">✅ Venue weighting applied (home games boosted 30%)</small>
+                                                    {% elif line_data.home_team.fallback_used %}
+                                                    <br><small class="text-warning">⚠️ {{ line_data.home_team.venue_weighting_error }}</small>
+                                                    {% elif line_data.home_team.relevant_venue_games < 3 %}
+                                                    <br><small class="text-muted">ℹ️ Equal weighting used (only {{ line_data.home_team.relevant_venue_games }} home games)</small>
+                                                    {% endif %}
+                                                </div>
+                                                <div class="mb-2">
+                                                    <strong>✈️ Away Team Performance:</strong>
+                                                    <code>{{ line_data.away_team.percentage_display }}</code>
+                                                    {% if line_data.away_team.venue_weighting_applied %}
+                                                    <br><small class="text-success">✅ Venue weighting applied (away games boosted 30%)</small>
+                                                    {% elif line_data.away_team.fallback_used %}
+                                                    <br><small class="text-warning">⚠️ {{ line_data.away_team.venue_weighting_error }}</small>
+                                                    {% elif line_data.away_team.relevant_venue_games < 3 %}
+                                                    <br><small class="text-muted">ℹ️ Equal weighting used (only {{ line_data.away_team.relevant_venue_games }} away games)</small>
+                                                    {% endif %}
+                                                </div>
+                                                <div class="mb-2">
+                                                    <strong>📊 Base Confidence:</strong>
+                                                    <code>({{ "%.1f"|format(line_data.home_team.rate) }} + {{ "%.1f"|format(line_data.away_team.rate) }}) ÷ 2 = {{ "%.1f"|format((line_data.home_team.rate + line_data.away_team.rate) / 2) }}%</code>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-6">
+                                                <div class="mb-2">
+                                                    <strong>📏 Sample Size Factor:</strong>
+                                                    <code>{{ line_data.sample_penalty }}</code>
+                                                    <br><small class="text-muted">{{ line_data.sample_description }}</small>
+                                                </div>
+                                                <div class="mb-2">
+                                                    <strong>⚖️ Consistency Factor:</strong>
+                                                    <code>{{ line_data.consistency_factor }}</code>
+                                                    <br><small class="text-muted">{{ line_data.consistency_details.calculation_formula }}</small>
+                                                    {% if line_data.consistency_details.has_small_sample_penalty %}
+                                                    <br><small class="text-warning">× 0.85 penalty for < 5 games</small>
+                                                    {% endif %}
+                                                </div>
+                                                <div class="mb-2">
+                                                    <strong>🎯 Final Confidence:</strong>
+                                                    <code>{{ "%.1f"|format(line_data.base_confidence) }}% × {{ line_data.sample_penalty }} × {{ line_data.consistency_factor }} = <span class="text-success fw-bold">{{ "%.1f"|format(line_data.base_confidence * line_data.sample_penalty * line_data.consistency_factor) }}%</span></code>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Recent Match Totals for Context -->
+                                        <div class="mt-3 border-top pt-2">
+                                            <div class="row">
+                                                <div class="col-md-6">
+                                                    <small><strong>🏠 Recent Match Totals:</strong> {{ line_data.home_team.recent_totals[:5] | join(', ') }}</small>
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <small><strong>✈️ Recent Match Totals:</strong> {{ line_data.away_team.recent_totals[:5] | join(', ') }}</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Detailed Consistency Breakdown -->
+                                        {% if line_data.consistency_details and loop.first %}
+                                        <div class="mt-3 border-top pt-2">
+                                            <h6 class="text-muted mb-2">🔍 Consistency Calculation Details</h6>
+                                            <div class="row">
+                                                <div class="col-md-6">
+                                                    <small>
+                                                        <strong>🏠 Home Team:</strong><br>
+                                                        • Over {{ line_data.line_value }}: {{ line_data.consistency_details.home_line_rate }}% ({{ line_data.consistency_details.home_line_count }})<br>
+                                                        • Predictability: {{ line_data.consistency_details.home_predictability }}%<br>
+                                                        • Line Consistency: {{ line_data.consistency_details.home_avg_consistency }}%
+                                                    </small>
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <small>
+                                                        <strong>✈️ Away Team:</strong><br>
+                                                        • Over {{ line_data.line_value }}: {{ line_data.consistency_details.away_line_rate }}% ({{ line_data.consistency_details.away_line_count }})<br>
+                                                        • Predictability: {{ line_data.consistency_details.away_predictability }}%<br>
+                                                        • Line Consistency: {{ line_data.consistency_details.away_avg_consistency }}%
+                                                    </small>
+                                                </div>
+                                            </div>
+                                            <div class="mt-2">
+                                                <small class="text-muted">
+                                                    <strong>Overall:</strong> ({{ line_data.consistency_details.home_avg_consistency }}% + {{ line_data.consistency_details.away_avg_consistency }}%) ÷ 2 = {{ line_data.consistency_details.overall_consistency }}%<br>
+                                                    <em>{{ line_data.consistency_details.explanation }}</em>
+                                                </small>
+                                            </div>
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- 🆕 REAL CALCULATION STEPS SECTION -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header bg-success text-white">
+                    <h4 class="mb-0"><i class="fas fa-calculator"></i> System Calculation Steps</h4>
+                    <small>Step-by-step breakdown of how the system calculated these predictions</small>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h5 class="text-primary mb-3">📊 Confidence Score Calculation</h5>
+                            
+                            <div class="mb-4">
+                                <h6 class="text-success">Over 5.5 Corners:</h6>
+                                <div class="p-3 bg-light rounded">
+                                    {% if analysis['calculation_breakdown']['confidence_calculations']['over_5_5']['base_confidence_before_h2h'] %}
+                                    <div class="mb-2">
+                                        <strong>Base Confidence:</strong> 
+                                        <code>{{ "%.1f"|format(analysis['calculation_breakdown']['confidence_calculations']['over_5_5']['base_confidence_before_h2h']) }}%</code>
+                                    </div>
+                                    {% endif %}
+                                    {% if analysis['calculation_breakdown']['confidence_calculations']['over_5_5']['h2h_adjustment'] != 0 %}
+                                    <div class="mb-2">
+                                        <strong>H2H Adjustment:</strong> 
+                                        <code>{% if analysis['calculation_breakdown']['confidence_calculations']['over_5_5']['h2h_adjustment'] > 0 %}+{% endif %}{{ "%.1f"|format(analysis['calculation_breakdown']['confidence_calculations']['over_5_5']['h2h_adjustment']) }}%</code>
+                                        <small class="text-muted">({{ analysis['calculation_breakdown']['confidence_calculations']['over_5_5']['h2h_reliability'] }})</small>
+                                    </div>
+                                    {% endif %}
+                                    <div class="mb-2">
+                                        <strong>Final Confidence:</strong> 
+                                        <code class="text-success fw-bold">{{ "%.1f"|format(analysis['calculation_breakdown']['confidence_calculations']['over_5_5']['calculated_confidence']) }}%</code>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="mb-4">
+                                <h6 class="text-warning">Over 6.5 Corners:</h6>
+                                <div class="p-3 bg-light rounded">
+                                    {% if analysis['calculation_breakdown']['confidence_calculations']['over_6_5']['base_confidence_before_h2h'] %}
+                                    <div class="mb-2">
+                                        <strong>Base Confidence:</strong> 
+                                        <code>{{ "%.1f"|format(analysis['calculation_breakdown']['confidence_calculations']['over_6_5']['base_confidence_before_h2h']) }}%</code>
+                                    </div>
+                                    {% endif %}
+                                    {% if analysis['calculation_breakdown']['confidence_calculations']['over_6_5']['h2h_adjustment'] != 0 %}
+                                    <div class="mb-2">
+                                        <strong>H2H Adjustment:</strong> 
+                                        <code>{% if analysis['calculation_breakdown']['confidence_calculations']['over_6_5']['h2h_adjustment'] > 0 %}+{% endif %}{{ "%.1f"|format(analysis['calculation_breakdown']['confidence_calculations']['over_6_5']['h2h_adjustment']) }}%</code>
+                                        <small class="text-muted">({{ analysis['calculation_breakdown']['confidence_calculations']['over_6_5']['h2h_reliability'] }})</small>
+                                    </div>
+                                    {% endif %}
+                                    <div class="mb-2">
+                                        <strong>Final Confidence:</strong> 
+                                        <code class="text-warning fw-bold">{{ "%.1f"|format(analysis['calculation_breakdown']['confidence_calculations']['over_6_5']['calculated_confidence']) }}%</code>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <h5 class="text-secondary mb-3">📈 Data Sources Used</h5>
+                            
+                            <div class="mb-3">
+                                <strong>🏠 {{ home_team.name }}:</strong>
+                                <div class="p-2 bg-light rounded mt-1">
+                                    <div><strong>Matches Analyzed:</strong> {{ analysis['calculation_breakdown']['home_team']['matches_count'] }}</div>
+                                    <div><strong>Corners Won:</strong> {{ analysis['calculation_breakdown']['home_team']['corners_won_list'] | join(', ') }}</div>
+                                    <div><strong>Raw Average:</strong> {{ "%.1f"|format(analysis['calculation_breakdown']['home_team']['raw_average_won']) }}</div>
+                                    <div><strong>Weighted Average:</strong> {{ "%.1f"|format(analysis['calculation_breakdown']['home_team']['weighted_average_won']) }}</div>
+                                    <div class="mt-2">
+                                        <strong>Line Performance:</strong><br>
+                                        <small>O5.5: {{ "%.1f"|format(analysis['calculation_breakdown']['confidence_calculations']['over_5_5']['consistency_details']['home_rate']) }}%</small><br>
+                                        <small>O6.5: {{ "%.1f"|format(analysis['calculation_breakdown']['confidence_calculations']['over_6_5']['consistency_details']['home_rate']) }}%</small>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <strong>✈️ {{ away_team.name }}:</strong>
+                                <div class="p-2 bg-light rounded mt-1">
+                                    <div><strong>Matches Analyzed:</strong> {{ analysis['calculation_breakdown']['away_team']['matches_count'] }}</div>
+                                    <div><strong>Corners Won:</strong> {{ analysis['calculation_breakdown']['away_team']['corners_won_list'] | join(', ') }}</div>
+                                    <div><strong>Raw Average:</strong> {{ "%.1f"|format(analysis['calculation_breakdown']['away_team']['raw_average_won']) }}</div>
+                                    <div><strong>Weighted Average:</strong> {{ "%.1f"|format(analysis['calculation_breakdown']['away_team']['weighted_average_won']) }}</div>
+                                    <div class="mt-2">
+                                        <strong>Line Performance:</strong><br>
+                                        <small>O5.5: {{ "%.1f"|format(analysis['calculation_breakdown']['confidence_calculations']['over_5_5']['consistency_details']['away_rate']) }}%</small><br>
+                                        <small>O6.5: {{ "%.1f"|format(analysis['calculation_breakdown']['confidence_calculations']['over_6_5']['consistency_details']['away_rate']) }}%</small>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            {% if cutoff_date %}
+                            <div class="alert alert-info">
+                                <strong>🕒 Time-Travel Mode:</strong> Only data before {{ cutoff_date }} was used in calculations (no look-ahead bias).
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Methodology Section -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h4 class="mb-0"><i class="fas fa-cogs"></i> Calculation Methodology</h4>
+                </div>
+                <div class="card-body methodology-section">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6 class="text-info">Data Collection</h6>
+                            <p class="mb-3">{{ analysis['methodology']['data_collection'] }}</p>
+                            
+                            <h6 class="text-info">Weighting System</h6>
+                            <p class="mb-3">{{ analysis['methodology']['weighting'] }}</p>
+                        </div>
+                        <div class="col-md-6">
+                            <h6 class="text-info">Consistency Analysis</h6>
+                            <p class="mb-3">{{ analysis['methodology']['consistency'] }}</p>
+                            
+                            <h6 class="text-info">Confidence Calculation</h6>
+                            <p class="mb-3">{{ analysis['methodology']['confidence'] }}</p>
+                        </div>
+                    </div>
+                    
+                    <h6 class="text-info">Additional Adjustments</h6>
+                    <p class="mb-0">{{ analysis['methodology']['adjustments'] }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Head-to-Head Section -->
+    {% if analysis['head_to_head'] and analysis['head_to_head']['matches'] %}
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header bg-warning text-dark">
+                    <h4 class="mb-0"><i class="fas fa-history"></i> Head-to-Head History</h4>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Home Team</th>
+                                    <th>Away Team</th>
+                                    <th>Home Corners</th>
+                                    <th>Away Corners</th>
+                                    <th>Total Corners</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for match in analysis['head_to_head']['matches'] %}
+                                <tr>
+                                    <td>{{ match.match_date.split('T')[0] if match.match_date else 'N/A' }}</td>
+                                    <td>{{ match.home_team_name }}</td>
+                                    <td>{{ match.away_team_name }}</td>
+                                    <td class="text-success">{{ match.corners_home or 0 }}</td>
+                                    <td class="text-danger">{{ match.corners_away or 0 }}</td>
+                                    <td class="text-primary"><strong>{{ (match.corners_home or 0) + (match.corners_away or 0) }}</strong></td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Chart.js configuration and data
+document.addEventListener('DOMContentLoaded', function() {
+    // Check if Chart.js is loaded
+    if (typeof Chart === 'undefined') {
+        console.error('Chart.js not loaded');
+        return;
+    }
+
+    // Home team chart
+    const homeCtx = document.getElementById('homeTeamChart');
+    if (homeCtx) {
+        const homeChart = new Chart(homeCtx, {
+            type: 'line',
+            data: {
+                labels: {{ analysis['home_team']['chart_data']['labels'] | tojson }},
+                datasets: [{
+                    label: 'Corners Won',
+                    data: {{ analysis['home_team']['chart_data']['corners_won'] | tojson }},
+                    borderColor: '#28a745',
+                    backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                    tension: 0.1,
+                    fill: true
+                }, {
+                    label: 'Corners Conceded',
+                    data: {{ analysis['home_team']['chart_data']['corners_conceded'] | tojson }},
+                    borderColor: '#dc3545',
+                    backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                    tension: 0.1,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Recent Corner Performance',
+                        font: {
+                            size: 14,
+                            weight: 'bold'
+                        }
+                    },
+                    legend: {
+                        position: 'bottom'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Corners'
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Match Date'
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // Away team chart
+    const awayCtx = document.getElementById('awayTeamChart');
+    if (awayCtx) {
+        const awayChart = new Chart(awayCtx, {
+            type: 'line',
+            data: {
+                labels: {{ analysis['away_team']['chart_data']['labels'] | tojson }},
+                datasets: [{
+                    label: 'Corners Won',
+                    data: {{ analysis['away_team']['chart_data']['corners_won'] | tojson }},
+                    borderColor: '#28a745',
+                    backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                    tension: 0.1,
+                    fill: true
+                }, {
+                    label: 'Corners Conceded',
+                    data: {{ analysis['away_team']['chart_data']['corners_conceded'] | tojson }},
+                    borderColor: '#dc3545',
+                    backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                    tension: 0.1,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Recent Corner Performance',
+                        font: {
+                            size: 14,
+                            weight: 'bold'
+                        }
+                    },
+                    legend: {
+                        position: 'bottom'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Corners'
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Match Date'
+                        }
+                    }
+                }
+            }
+        });
+    }
+});
+</script>
+{% endblock %}

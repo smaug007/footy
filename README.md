@@ -1,31 +1,25 @@
-# China Super League Corner Prediction System
+# 🏈 China Super League Corner Prediction System
 
-A sophisticated corner prediction system for China Super League matches using consistency-based analysis and historical data.
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Flask](https://img.shields.io/badge/flask-3.0+-green.svg)](https://flask.palletsprojects.com/)
+[![License](https://img.shields.io/badge/license-Educational-orange.svg)](#license)
 
-## 🎯 Project Status
+A sophisticated corner and BTTS prediction system for China Super League matches using advanced statistical analysis and consistency-based algorithms.
 
-**Current Phase**: Phase 1 - Foundation Setup (Days 1-2 Complete)
+## 🎯 Main Features
 
-### ✅ Completed
-- [x] Git repository initialization
-- [x] Python virtual environment setup
-- [x] Dependencies installation (Python 3.13 compatible)
-- [x] Project structure creation
-- [x] Basic Flask application setup
-- [x] Configuration system
-- [x] HTML templates (Base, Index, Accuracy Dashboard, Verification)
-- [x] CSS and JavaScript foundation
-
-### 🔄 Next Steps
-- [ ] API-Football integration (Days 3-4)
-- [ ] Database setup (Days 5-7)
-- [ ] Data analysis engine (Phase 2)
+- **Corner Predictions** with Over 5.5/6.5 line analysis
+- **BTTS Predictions** (Both Teams To Score) with probability analysis
+- **Real-Time Fixtures** from API-Football integration
+- **Team Analysis** with consistency and form evaluation
+- **Prediction Interface** with confidence levels and recommendations
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Python 3.9+ (tested with Python 3.13.1)
-- API-Football subscription key
+- **Python 3.9+**
+- **API-Football Subscription** (for fixture data)
+- **Modern Web Browser**
 
 ### Installation
 
@@ -37,10 +31,13 @@ A sophisticated corner prediction system for China Super League matches using co
 
 2. **Set up virtual environment**
    ```bash
+   # Windows
    python -m venv venv
-   venv\Scripts\activate  # Windows
-   # or
-   source venv/bin/activate  # Linux/Mac
+   venv\Scripts\activate
+   
+   # Linux/Mac
+   python3 -m venv venv
+   source venv/bin/activate
    ```
 
 3. **Install dependencies**
@@ -48,120 +45,182 @@ A sophisticated corner prediction system for China Super League matches using co
    pip install -r requirements.txt
    ```
 
-4. **Configure environment variables**
-   - Copy `env.example` to `.env`
-   - Add your API-Football key:
-     ```
-     API_FOOTBALL_KEY=your_actual_api_key_here
-     ```
+4. **Configure API Key**
+   
+   Edit `config.py` and update the API key:
+   ```python
+   API_FOOTBALL_KEY = 'your_api_key_here'
+   ```
 
-5. **Run the application**
+5. **Initialize Database**
+   ```bash
+   python -c "from data.database import get_db_manager; get_db_manager()"
+   ```
+
+6. **Run the application**
    ```bash
    python app.py
    ```
 
-6. **Open your browser**
+7. **Open your browser**
    - Navigate to: `http://localhost:5000`
+   - Start making predictions!
 
-## 📊 System Architecture
+## 🏗️ System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Web Interface (Flask)                    │
+├─────────────────────────────────────────────────────────────┤
+│  Templates │  Static Assets │  API Routes │  Error Handling │
+└─────────────────────────────────────────────────────────────┘
+                                │
+┌─────────────────────────────────────────────────────────────┐
+│                  Prediction Engine                          │
+├─────────────────────────────────────────────────────────────┤
+│ Team Analysis │ Consistency │ H2H Analysis │ Confidence Calc │
+└─────────────────────────────────────────────────────────────┘
+                                │
+┌─────────────────────────────────────────────────────────────┐
+│                    Data Layer                               │
+├─────────────────────────────────────────────────────────────┤
+│   API Client  │  Database   │   Storage   │   Validation    │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ### Core Components
-- **Flask Web Application**: Main interface and API endpoints
-- **API-Football Integration**: Real-time match and statistics data
-- **SQLite Database**: Local storage for predictions and accuracy tracking
-- **Consistency Analysis Engine**: Advanced corner prediction algorithms
-- **Accuracy Tracking System**: Performance monitoring and validation
 
-### Prediction Methodology
-1. **Four-Metric Analysis**: Corners won/conceded for both teams
-2. **Consistency Scoring**: Statistical reliability measurement
-3. **Reliability Thresholds**: 90% confidence floor calculations
-4. **Seasonal Tracking**: Current season vs all-time performance
-5. **Confidence vs Accuracy Separation**: Clear distinction between prediction certainty and historical performance
-
-## 🎯 Features
-
-### Current (Phase 1)
-- ✅ Responsive web interface
-- ✅ System status monitoring
-- ✅ Configuration management
-- ✅ Error handling and logging
-
-### Coming Soon (Phase 2)
-- 🔄 China Super League data fetching
-- 🔄 Corner prediction algorithms
-- 🔄 Accuracy tracking system
-- 🔄 Manual verification interface
-
-### Planned (Phase 3+)
-- 📅 Advanced visualizations
-- 📅 Historical analysis reports
-- 📅 Betting recommendations
-- 📅 Mobile optimization
-
-## 🔧 Configuration
-
-### Environment Variables
-```bash
-API_FOOTBALL_KEY=your_api_key_here    # Required: API-Football subscription key
-SECRET_KEY=your_secret_key            # Flask secret key
-FLASK_DEBUG=True                      # Development mode
-DATABASE_PATH=corners_prediction.db   # SQLite database path
+```
+├── app.py                         # Main Flask application
+├── config.py                      # Configuration settings
+├── requirements.txt               # Python dependencies
+├── corners_prediction.db          # SQLite database
+├── data/                          # Data processing modules
+│   ├── api_client.py              # API-Football integration
+│   ├── database.py                # Database operations
+│   ├── prediction_engine.py       # Main prediction logic
+│   ├── goal_analyzer.py           # BTTS prediction engine
+│   ├── consistency_analyzer.py    # Consistency calculations
+│   ├── head_to_head_analyzer.py   # H2H analysis
+│   ├── team_analyzer.py           # Team statistics analysis
+│   ├── accuracy_tracker.py        # Accuracy monitoring
+│   └── prediction_storage.py      # Prediction storage
+├── templates/                     # HTML templates
+│   ├── base.html                  # Base template
+│   └── index.html                 # Main prediction interface
+└── static/                        # Static assets
+    ├── css/style.css              # Custom styling
+    └── js/main.js                 # JavaScript utilities
 ```
 
-### API Limits
-- **Daily Calls**: 7,500
-- **Per Minute**: 300
-- **League Focus**: China Super League (ID: 169)
+## 🔬 Prediction Methodology
 
-## 📈 Prediction Targets
+### Advanced Statistical Analysis
 
-- **Primary Goal**: 90% accuracy for high-confidence predictions
-- **Secondary Goal**: 75% accuracy for medium-confidence predictions
-- **Line Accuracy**: 80%+ on over 5.5 and 6.5 corner predictions
-- **Tolerance**: ±1 corner considered correct
-
-## 🧪 Testing
-
-```bash
-# Run all tests
-pytest
-
-# Run specific test file
-pytest tests/test_api.py
-
-# Run with coverage
-pytest --cov=.
+#### 1. **Four-Metric Foundation**
+```python
+# Core metrics for each team:
+- Corners Won (Home/Away splits)
+- Corners Conceded (Home/Away splits)
+- Weighted Recent Performance (last 5-10 games)
+- Consistency Score (coefficient of variation)
 ```
 
-## 📝 Development Log
+#### 2. **Consistency Analysis**
+```python
+# Statistical reliability measures:
+- Standard Deviation Analysis
+- Coefficient of Variation (CV)
+- 90% Confidence Intervals
+- Trend Detection (linear regression)
+```
 
-### Phase 1 - Day 1-2 (Completed)
-- ✅ Project initialization and structure
-- ✅ Flask application framework
-- ✅ Basic UI templates and styling
-- ✅ Configuration system
-- ✅ Development environment setup
+#### 3. **BTTS Analysis**
+```python
+# Goal scoring probability:
+- Team scoring rates (home/away)
+- Defensive strength analysis
+- Dynamic weight adjustment
+- Venue-specific performance
+```
 
-### Phase 1 - Day 3-4 (Next)
-- 🔄 API-Football client implementation
-- 🔄 Rate limiting and caching
-- 🔄 China Super League data fetching
-- 🔄 Error handling and retry logic
+## 🎮 Usage Guide
 
-## 🤝 Contributing
+### Main Prediction Interface
 
-This is currently a personal project following a structured development plan. The system is being built in phases with clear milestones and testing at each stage.
+1. **Fixtures Tab**: View upcoming matches with auto-generated predictions
+2. **Custom Analysis Tab**: Select specific teams for detailed analysis
+3. **System Performance**: View accuracy metrics and recent predictions
 
-## 📄 License
+### Making Predictions
 
-Educational use only. Not for commercial gambling purposes.
+1. **From Fixtures**: Click "Predict" on any upcoming match
+2. **Custom Teams**: Select home/away teams and generate prediction
+3. **View Results**: Get corner totals, line predictions, and BTTS analysis
 
-## ⚠️ Disclaimer
+### Understanding Results
 
-This system is for educational and analytical purposes only. Always gamble responsibly and within your means. Past performance does not guarantee future results.
+- **Total Corners**: Predicted match total
+- **Over 5.5/6.5**: Confidence percentages for betting lines
+- **BTTS**: Both Teams To Score probability
+- **Quality Metrics**: Data reliability and confidence scores
+
+## ⚙️ Configuration
+
+### API Settings
+```python
+# config.py
+API_FOOTBALL_KEY = 'your_api_key_here'
+CHINA_SUPER_LEAGUE_ID = 169
+API_CALLS_PER_DAY = 7500
+API_CALLS_PER_MINUTE = 300
+```
+
+### Prediction Settings
+```python
+MIN_GAMES_FOR_PREDICTION = 3
+MAX_GAMES_FOR_ANALYSIS = 20
+TARGET_ACCURACY = 0.90
+CORNER_TOLERANCE = 1  # ±1 corner considered correct
+```
+
+## 🛠️ Troubleshooting
+
+### Common Issues
+
+1. **API Key Invalid**: Update `API_FOOTBALL_KEY` in `config.py`
+2. **No Fixtures**: Check internet connection and API limits
+3. **Database Error**: Delete `corners_prediction.db` to recreate
+4. **Import Error**: Run `pip install -r requirements.txt`
+
+### Performance Tips
+
+- **API Limits**: Monitor daily/minute call limits
+- **Data Quality**: More historical data = better predictions
+- **Browser**: Use modern browser for best experience
+
+## 📊 File Structure
+
+**Essential Files**: 20-25 files  
+**Database Tables**: 6 normalized tables  
+**API Endpoints**: 6 core endpoints for main page  
+**Templates**: 2 HTML templates  
+**JavaScript**: 2 JS files with utilities  
+
+## 🔗 API Endpoints
+
+Main page uses these endpoints:
+- `/api/fixtures/upcoming` - Get upcoming matches
+- `/api/teams` - Get team list for dropdowns
+- `/api/predict` - Generate match predictions
+- `/api/betting-opportunities` - High-confidence suggestions
+- `/api/accuracy` - System performance metrics
+- `/api/unverified-predictions` - Recent predictions
+
+## 📝 License
+
+This project is for educational purposes only. Always gamble responsibly and within your means.
 
 ---
 
-**Last Updated**: Phase 1, Days 1-2 Complete
-**Next Milestone**: API Integration (Days 3-4)
+**Status**: ✅ **PRODUCTION READY** - Main prediction interface fully functional!

@@ -17,6 +17,7 @@
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
         <div class="container">
             <a class="navbar-brand" href="{{ url_for('index') }}">
+                <i class="fas fa-futbol me-2"></i>
                 <strong>CSL Corner Predictions</strong>
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
@@ -25,10 +26,19 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto">
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('index') }}">Predictions</a>
+                        <a class="nav-link" href="{{ url_for('index') }}">
+                            <i class="fas fa-home"></i> Predictions
+                        </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('accuracy_dashboard') }}">Accuracy Dashboard</a>
+                        <a class="nav-link" href="{{ url_for('predictions_history') }}">
+                            <i class="fas fa-history"></i> My Predictions
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('backtesting') }}">
+                            <i class="fas fa-chart-line"></i> Backtesting
+                        </a>
                     </li>
                 </ul>
             </div>
@@ -53,8 +63,12 @@
 
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- Custom JS -->
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <!-- Enhanced JS -->
+    <script src="{{ url_for('static', filename='js/enhanced.js') }}"></script>
     
     {% block extra_js %}{% endblock %}
 </body>

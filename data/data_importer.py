@@ -164,10 +164,10 @@ class DataImporter:
             raise
     
     def import_match_statistics(self, season: int, limit: int = None) -> int:
-        """Import match statistics (corners) for completed matches."""
+        """Import match statistics (corners) for completed matches using correct API approach."""
         try:
             # Get completed matches from database that don't have corner data yet
-            completed_matches = self.db_manager.get_completed_matches(season, limit)
+            completed_matches = self.db_manager.get_matches_needing_corner_stats(season, limit)
             
             if not completed_matches:
                 logger.info(f"No completed matches found for season {season}")
@@ -181,65 +181,28 @@ class DataImporter:
                     continue
                 
                 try:
-                    # Get match statistics from API
-                    stats_response = self.api_client.get_fixture_statistics(match['api_fixture_id'])
-                    stats_data = stats_response.get('response', [])
+                    # Use the new corner-specific method
+                    corner_data = self.api_client.get_fixture_corner_statistics(match['api_fixture_id'])
                     
-                    if not stats_data:
-                        logger.debug(f"No statistics found for match {match['api_fixture_id']}")
+                    if not corner_data or corner_data['home_corners'] is None:
+                        logger.debug(f"No corner statistics found for match {match['api_fixture_id']}")
                         continue
                     
-                    # Extract corner statistics
-                    corners_home = None
-                    corners_away = None
+                    # Update match with corner data
+                    success = self.db_manager.update_match_corners(
+                        match['id'],
+                        corner_data['home_corners'],
+                        corner_data['away_corners']
+                    )
                     
-                    for team_stats in stats_data:
-                        team_id = team_stats.get('team', {}).get('id')
-                        statistics = team_stats.get('statistics', [])
-                        
-                        # Find corner kicks statistic
-                        for stat in statistics:
-                            if stat.get('type') == 'Corner Kicks':
-                                corner_value = stat.get('value')
-                                if corner_value is not None:
-                                    # Convert to integer if it's a string
-                                    try:
-                                        corner_count = int(corner_value)
-                                        
-                                        # Determine if home or away team
-                                        home_team = self.db_manager.get_team_by_api_id(
-                                            match['home_team_id'], season
-                                        )
-                                        if home_team and home_team.get('api_team_id') == team_id:
-                                            corners_home = corner_count
-                                        else:
-                                            corners_away = corner_count
-                                    except (ValueError, TypeError):
-                                        logger.warning(f"Invalid corner value: {corner_value}")
-                    
-                    # Update match with corner statistics
-                    if corners_home is not None and corners_away is not None:
-                        updated_match_data = {
-                            'api_fixture_id': match['api_fixture_id'],
-                            'home_team_id': match['home_team_id'],
-                            'away_team_id': match['away_team_id'],
-                            'match_date': match['match_date'],
-                            'venue_name': match['venue_name'],
-                            'corners_home': corners_home,
-                            'corners_away': corners_away,
-                            'season': season,
-                            'status': match['status'],
-                            'referee': match['referee']
-                        }
-                        
-                        self.db_manager.insert_match(updated_match_data)
+                    if success:
                         imported_count += 1
-                        
-                        logger.debug(f"Updated match statistics: {match['home_team_name']} {corners_home} - {corners_away} {match['away_team_name']}")
-                    
+                        logger.debug(f"Updated match {match['api_fixture_id']} with corners: {corner_data['home_corners']}-{corner_data['away_corners']}")
+                    else:
+                        logger.warning(f"Failed to update match {match['api_fixture_id']} with corner data")
+                
                 except Exception as e:
-                    logger.error(f"Failed to import statistics for match {match['api_fixture_id']}: {e}")
-                    self.imported_counts['errors'] += 1
+                    logger.error(f"Error importing statistics for match {match['api_fixture_id']}: {e}")
                     continue
             
             self.imported_counts['statistics'] = imported_count

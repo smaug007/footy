@@ -1,0 +1,336 @@
+{% extends "base.html" %}
+
+{% block title %}Backtesting - Historical Prediction Analysis{% endblock %}
+
+{% block content %}
+
+<!-- Page Header -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <h1 class="mb-0">
+                    <i class="fas fa-chart-line text-primary"></i> Backtesting
+                </h1>
+                <p class="text-muted mb-0">Historical prediction analysis for 2025 season (Matchdays 10-23)</p>
+            </div>
+            <div>
+                <button class="btn btn-primary" onclick="runBacktest()" id="runBacktestBtn">
+                    <i class="fas fa-play"></i> Run Backtest
+                </button>
+                <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">
+                    <i class="fas fa-arrow-left"></i> Back to Predictions
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if error %}
+<!-- Error Message -->
+<div class="alert alert-danger">
+    <i class="fas fa-exclamation-triangle"></i> {{ error }}
+</div>
+{% else %}
+
+<!-- Summary Statistics -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card bg-primary text-white">
+            <div class="card-body text-center">
+                <i class="fas fa-list fa-2x mb-2"></i>
+                <h3 class="mb-0">{{ summary.total_predictions or 0 }}</h3>
+                <small>Total Backtests</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-success text-white">
+            <div class="card-body text-center">
+                <i class="fas fa-percentage fa-2x mb-2"></i>
+                <h3 class="mb-0">{{ "%.1f"|format(summary.average_accuracy or 0) }}%</h3>
+                <small>Average Accuracy</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-info text-white">
+            <div class="card-body text-center">
+                <i class="fas fa-bullseye fa-2x mb-2"></i>
+                <h3 class="mb-0">{{ "%.1f"|format(summary.over_5_5_success_rate or 0) }}%</h3>
+                <small>Over 5.5 Success</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card bg-warning text-white">
+            <div class="card-body text-center">
+                <i class="fas fa-target fa-2x mb-2"></i>
+                <h3 class="mb-0">{{ "%.1f"|format(summary.over_6_5_success_rate or 0) }}%</h3>
+                <small>Over 6.5 Success</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Backtest Controls -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">
+            <i class="fas fa-cogs"></i> Backtest Configuration
+        </h5>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-6">
+                <label for="matchdayStart" class="form-label">Start Matchday</label>
+                <select class="form-select" id="matchdayStart">
+                    <option value="10" selected>Matchday 10 (May 1st, 2025)</option>
+                    <option value="11">Matchday 11</option>
+                    <option value="12">Matchday 12</option>
+                    <option value="15">Matchday 15</option>
+                    <option value="20">Matchday 20</option>
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label for="matchdayEnd" class="form-label">End Matchday</label>
+                <select class="form-select" id="matchdayEnd">
+                    <option value="15">Matchday 15</option>
+                    <option value="20">Matchday 20</option>
+                    <option value="23" selected>Matchday 23 (Current)</option>
+                </select>
+            </div>
+        </div>
+        <div class="mt-3">
+            <small class="text-muted">
+                <i class="fas fa-info-circle"></i> 
+                Backtesting uses matches from Matchdays 1-9 as training data, then makes predictions for the selected range using only historical data available at each match time.
+            </small>
+        </div>
+    </div>
+</div>
+
+<!-- Progress Bar (hidden by default) -->
+<div class="card mb-4" id="progressCard" style="display: none;">
+    <div class="card-body">
+        <h6>Processing Backtest...</h6>
+        <div class="progress">
+            <div class="progress-bar progress-bar-striped progress-bar-animated" id="progressBar" 
+                 role="progressbar" style="width: 0%"></div>
+        </div>
+        <div class="mt-2" id="progressText">Initializing...</div>
+    </div>
+</div>
+
+<!-- Backtest Results -->
+{% if existing_results %}
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">
+            <i class="fas fa-table"></i> Backtest Results
+        </h5>
+        <span class="badge bg-primary">{{ existing_results|length }} Results</span>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead class="table-light">
+                    <tr>
+                        <th>Matchday</th>
+                        <th>Match</th>
+                        <th>Date</th>
+                        <th>Predicted Total</th>
+                        <th>Goal Scores</th>
+                        <th>Actual</th>
+                        <th>Result</th>
+                        <th>Accuracy</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for result in existing_results %}
+                    <tr>
+                        <td>
+                            <span class="badge bg-secondary">MD {{ result.matchday }}</span>
+                        </td>
+                        <td>
+                            <strong>{{ result.home_team_name }}</strong> vs <strong>{{ result.away_team_name }}</strong>
+                        </td>
+                        <td>
+                            <small class="text-muted">{{ result.match_date }}</small>
+                        </td>
+                        <td>
+                            <div class="d-flex flex-column">
+                                <span class="fw-bold">{{ "%.1f"|format(result.predicted_total) }}</span>
+                                <small class="text-muted">
+                                    5.5: {{ "%.0f"|format(result.confidence_5_5) }}% | 
+                                    6.5: {{ "%.0f"|format(result.confidence_6_5) }}%
+                                </small>
+                            </div>
+                        </td>
+                        <td>
+                            {% if result.home_score_prob and result.away_score_prob %}
+                            <div class="d-flex justify-content-between">
+                                <span class="badge bg-light text-dark">
+                                    🏠 {{ "%.0f"|format(result.home_score_prob) }}%
+                                </span>
+                                <span class="badge bg-light text-dark">
+                                    ✈️ {{ "%.0f"|format(result.away_score_prob) }}%
+                                </span>
+                            </div>
+                            {% else %}
+                            <span class="text-muted">N/A</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if result.actual_corners is not none %}
+                                <span class="badge bg-dark">{{ result.actual_corners }}</span>
+                            {% else %}
+                                <span class="text-muted">N/A</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if result.actual_corners is not none %}
+                                <div class="d-flex flex-column">
+                                    {% if result.over_5_5_correct %}
+                                        <span class="badge bg-success">5.5 ✓</span>
+                                    {% else %}
+                                        <span class="badge bg-danger">5.5 ✗</span>
+                                    {% endif %}
+                                    {% if result.over_6_5_correct %}
+                                        <span class="badge bg-success">6.5 ✓</span>
+                                    {% else %}
+                                        <span class="badge bg-danger">6.5 ✗</span>
+                                    {% endif %}
+                                </div>
+                            {% else %}
+                                <span class="text-muted">Pending</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if result.accuracy is not none %}
+                                <div class="text-center">
+                                    <div class="fw-bold {% if result.accuracy >= 70 %}text-success{% elif result.accuracy >= 50 %}text-warning{% else %}text-danger{% endif %}">
+                                        {{ "%.1f"|format(result.accuracy) }}%
+                                    </div>
+                                </div>
+                            {% else %}
+                                <span class="text-muted">N/A</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="card">
+    <div class="card-body text-center py-5">
+        <i class="fas fa-chart-line fa-3x text-muted mb-3"></i>
+        <h5>No Backtest Results Yet</h5>
+        <p class="text-muted">Click "Run Backtest" to analyze historical predictions for the 2025 season.</p>
+        <button class="btn btn-primary" onclick="runBacktest()">
+            <i class="fas fa-play"></i> Start Backtesting
+        </button>
+    </div>
+</div>
+{% endif %}
+
+{% endif %}
+
+<script>
+async function runBacktest() {
+    const btn = document.getElementById('runBacktestBtn');
+    const progressCard = document.getElementById('progressCard');
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+    
+    // Get selected range
+    const matchdayStart = parseInt(document.getElementById('matchdayStart').value);
+    const matchdayEnd = parseInt(document.getElementById('matchdayEnd').value);
+    
+    if (matchdayStart > matchdayEnd) {
+        alert('Start matchday cannot be greater than end matchday!');
+        return;
+    }
+    
+    // Disable button and show progress
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Running...';
+    progressCard.style.display = 'block';
+    progressText.textContent = 'Starting backtest analysis...';
+    
+    try {
+        const response = await fetch('/api/run-backtest', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                matchday_start: matchdayStart,
+                matchday_end: matchdayEnd
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Update progress
+            progressBar.style.width = '100%';
+            progressBar.classList.remove('progress-bar-animated');
+            progressBar.classList.add('bg-success');
+            progressText.textContent = `Completed! Processed ${data.processed} matches with ${data.errors} errors.`;
+            
+            // Show success message
+            setTimeout(() => {
+                alert(`Backtest completed!\n\nProcessed: ${data.processed} matches\nErrors: ${data.errors} matches\n\nPage will reload to show results.`);
+                location.reload();
+            }, 1000);
+        } else {
+            throw new Error(data.error || 'Unknown error occurred');
+        }
+        
+    } catch (error) {
+        console.error('Backtest error:', error);
+        progressBar.classList.add('bg-danger');
+        progressText.textContent = 'Error: ' + error.message;
+        alert('Error running backtest: ' + error.message);
+    } finally {
+        // Re-enable button
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-play"></i> Run Backtest';
+        
+        // Hide progress after delay
+        setTimeout(() => {
+            progressCard.style.display = 'none';
+            progressBar.style.width = '0%';
+            progressBar.classList.remove('bg-success', 'bg-danger');
+            progressBar.classList.add('progress-bar-animated');
+        }, 3000);
+    }
+}
+
+// Auto-update progress text every 500ms during processing
+let progressInterval;
+
+function startProgressTracking() {
+    let dots = 0;
+    progressInterval = setInterval(() => {
+        dots = (dots + 1) % 4;
+        const dotString = '.'.repeat(dots);
+        const currentText = document.getElementById('progressText').textContent;
+        if (currentText.includes('Processing')) {
+            document.getElementById('progressText').textContent = `Processing backtest${dotString}`;
+        }
+    }, 500);
+}
+
+function stopProgressTracking() {
+    if (progressInterval) {
+        clearInterval(progressInterval);
+    }
+}
+</script>
+
+{% endblock %}
