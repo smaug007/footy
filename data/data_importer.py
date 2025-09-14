@@ -24,43 +24,96 @@ class DataImporter:
             'errors': 0
         }
         
-    def import_season_data(self, season: int, import_matches: bool = True, 
+    def import_season_data(self, league_id: int, season: int, import_matches: bool = True, 
                           import_statistics: bool = True) -> Dict:
-        """Import complete season data (teams, matches, statistics)."""
-        logger.info(f"Starting import for season {season}")
+        """Import complete season data for any league (teams, matches, statistics)."""
+        from data.league_manager import get_league_manager
+        league_manager = get_league_manager()
+        league_config = league_manager.get_league_by_id(league_id)
+        
+        if not league_config:
+            logger.error(f"League {league_id} not found")
+            return self.imported_counts
+        
+        logger.info(f"Starting import for {league_config.name} season {season}")
         
         try:
             # Step 1: Import teams
-            teams_imported = self.import_teams(season)
-            logger.info(f"Imported {teams_imported} teams for season {season}")
+            teams_imported = self.import_teams(league_id, season)
+            logger.info(f"Imported {teams_imported} teams for {league_config.name} season {season}")
             
             if import_matches:
                 # Step 2: Import matches
-                matches_imported = self.import_matches(season)
-                logger.info(f"Imported {matches_imported} matches for season {season}")
+                matches_imported = self.import_matches(league_id, season)
+                logger.info(f"Imported {matches_imported} matches for {league_config.name} season {season}")
                 
                 if import_statistics:
                     # Step 3: Import match statistics (corners)
-                    stats_imported = self.import_match_statistics(season)
+                    stats_imported = self.import_match_statistics(league_id, season)
                     logger.info(f"Imported statistics for {stats_imported} matches")
             
-            logger.info(f"Season {season} import completed successfully")
+            logger.info(f"{league_config.name} season {season} import completed successfully")
             return self.imported_counts
             
         except Exception as e:
-            logger.error(f"Failed to import season {season} data: {e}")
+            logger.error(f"Failed to import {league_config.name} season {season} data: {e}")
             self.imported_counts['errors'] += 1
             raise
     
-    def import_teams(self, season: int) -> int:
-        """Import CSL teams for a season."""
+    def import_league_data(self, league_id: int, season: int = None):
+        """Import complete data for specific league (MULTI-LEAGUE SUPPORT)."""
+        from data.league_manager import get_league_manager
+        league_manager = get_league_manager()
+        league_config = league_manager.get_league_by_id(league_id)
+        
+        if not league_config:
+            logger.error(f"League {league_id} not found")
+            return None
+        
+        if not season:
+            season = league_manager.get_current_season(league_id)
+            
+        logger.info(f"Importing league data: {league_config.name} season {season}")
+        
+        # Reset counters for this league import
+        self.imported_counts = {'teams': 0, 'matches': 0, 'statistics': 0, 'errors': 0}
+        
+        # Import teams with league_id
+        teams_imported = self.import_teams(league_id, season)
+        
+        # Import matches with league_id  
+        matches_imported = self.import_matches(league_id, season)
+        
+        # Import statistics with league_id
+        stats_imported = self.import_match_statistics(league_id, season)
+        
+        return {
+            'league_id': league_id,
+            'league_name': league_config.name,
+            'season': season,
+            'teams_imported': teams_imported,
+            'matches_imported': matches_imported,
+            'stats_imported': stats_imported
+        }
+    
+    def import_teams(self, league_id: int, season: int) -> int:
+        """Import teams for any league and season."""
         try:
-            # Get teams from API
-            teams_response = self.api_client.get_china_super_league_teams(season)
+            # Get league config for API league ID
+            from data.league_manager import get_league_manager
+            league_manager = get_league_manager()
+            league_config = league_manager.get_league_by_id(league_id)
+            
+            if not league_config:
+                logger.error(f"League {league_id} not found")
+                return 0
+            
+            # Get teams from API using generic method
+            teams_response = self.api_client.get_league_teams(league_config.api_league_id, season)
             teams_data = teams_response.get('response', [])
             
             if not teams_data:
-                logger.warning(f"No teams found for season {season}")
+                logger.warning(f"No teams found for {league_config.name} season {season}")
                 return 0
             
             imported_count = 0
@@ -70,25 +123,26 @@ class DataImporter:
                     team_info = team_data.get('team', {})
                     venue_info = team_data.get('venue', {})
                     
-                    # Prepare team data for database
+                    # Prepare team data for database (with league_id)
                     db_team_data = {
                         'api_team_id': team_info.get('id'),
                         'name': team_info.get('name'),
                         'code': team_info.get('code'),
-                        'country': team_info.get('country', 'China'),
+                        'country': team_info.get('country', league_config.country),
                         'logo_url': team_info.get('logo'),
                         'founded': team_info.get('founded'),
                         'venue_name': venue_info.get('name'),
                         'venue_capacity': venue_info.get('capacity'),
                         'venue_city': venue_info.get('city'),
-                        'season': season
+                        'season': season,
+                        'league_id': league_id  # MULTI-LEAGUE SUPPORT
                     }
                     
                     # Insert/update team in database
                     team_id = self.db_manager.insert_team(db_team_data)
                     imported_count += 1
                     
-                    logger.debug(f"Imported team: {team_info.get('name')} (ID: {team_id})")
+                    logger.debug(f"Imported team: {team_info.get('name')} to {league_config.name} (ID: {team_id})")
                     
                 except Exception as e:
                     logger.error(f"Failed to import team {team_info.get('name', 'Unknown')}: {e}")
@@ -96,21 +150,31 @@ class DataImporter:
                     continue
             
             self.imported_counts['teams'] = imported_count
+            logger.info(f"Imported {imported_count} teams for {league_config.name} season {season}")
             return imported_count
             
         except APIException as e:
-            logger.error(f"API error importing teams for season {season}: {e}")
+            logger.error(f"API error importing teams for league {league_id} season {season}: {e}")
             raise
     
-    def import_matches(self, season: int) -> int:
-        """Import CSL matches for a season."""
+    def import_matches(self, league_id: int, season: int) -> int:
+        """Import matches for any league and season."""
         try:
-            # Get fixtures from API
-            fixtures_response = self.api_client.get_china_super_league_fixtures(season)
+            # Get league config for API league ID
+            from data.league_manager import get_league_manager
+            league_manager = get_league_manager()
+            league_config = league_manager.get_league_by_id(league_id)
+            
+            if not league_config:
+                logger.error(f"League {league_id} not found")
+                return 0
+            
+            # Get fixtures from API using generic method
+            fixtures_response = self.api_client.get_league_fixtures(league_config.api_league_id, season)
             fixtures_data = fixtures_response.get('response', [])
             
             if not fixtures_data:
-                logger.warning(f"No fixtures found for season {season}")
+                logger.warning(f"No fixtures found for {league_config.name} season {season}")
                 return 0
             
             imported_count = 0
@@ -120,18 +184,31 @@ class DataImporter:
                     fixture_info = fixture_data.get('fixture', {})
                     teams_info = fixture_data.get('teams', {})
                     
-                    # Get team IDs from database
+                    # Get team IDs from database (league-specific lookup)
                     home_team_api_id = teams_info.get('home', {}).get('id')
                     away_team_api_id = teams_info.get('away', {}).get('id')
                     
-                    home_team = self.db_manager.get_team_by_api_id(home_team_api_id, season)
-                    away_team = self.db_manager.get_team_by_api_id(away_team_api_id, season)
+                    # Find teams within this league and season
+                    with self.db_manager.get_connection() as conn:
+                        cursor = conn.execute("""
+                            SELECT id, name FROM teams 
+                            WHERE api_team_id = ? AND league_id = ? AND season = ?
+                        """, (home_team_api_id, league_id, season))
+                        home_team = cursor.fetchone()
+                        home_team = dict(home_team) if home_team else None
+                        
+                        cursor = conn.execute("""
+                            SELECT id, name FROM teams 
+                            WHERE api_team_id = ? AND league_id = ? AND season = ?
+                        """, (away_team_api_id, league_id, season))
+                        away_team = cursor.fetchone()
+                        away_team = dict(away_team) if away_team else None
                     
                     if not home_team or not away_team:
-                        logger.warning(f"Teams not found for fixture {fixture_info.get('id')}")
+                        logger.warning(f"Teams not found for fixture {fixture_info.get('id')} in {league_config.name}")
                         continue
                     
-                    # Prepare match data for database
+                    # Prepare match data for database (with league_id)
                     db_match_data = {
                         'api_fixture_id': fixture_info.get('id'),
                         'home_team_id': home_team['id'],
@@ -141,6 +218,7 @@ class DataImporter:
                         'season': season,
                         'status': fixture_info.get('status', {}).get('short', 'NS'),
                         'referee': fixture_info.get('referee'),
+                        'league_id': league_id,  # MULTI-LEAGUE SUPPORT
                         'corners_home': None,  # Will be updated with statistics
                         'corners_away': None   # Will be updated with statistics
                     }
@@ -149,7 +227,7 @@ class DataImporter:
                     match_id = self.db_manager.insert_match(db_match_data)
                     imported_count += 1
                     
-                    logger.debug(f"Imported match: {home_team['name']} vs {away_team['name']} (ID: {match_id})")
+                    logger.debug(f"Imported match: {home_team['name']} vs {away_team['name']} to {league_config.name} (ID: {match_id})")
                     
                 except Exception as e:
                     logger.error(f"Failed to import fixture {fixture_info.get('id', 'Unknown')}: {e}")
@@ -157,20 +235,30 @@ class DataImporter:
                     continue
             
             self.imported_counts['matches'] = imported_count
+            logger.info(f"Imported {imported_count} matches for {league_config.name} season {season}")
             return imported_count
             
         except APIException as e:
-            logger.error(f"API error importing matches for season {season}: {e}")
+            logger.error(f"API error importing matches for league {league_id} season {season}: {e}")
             raise
     
-    def import_match_statistics(self, season: int, limit: int = None) -> int:
-        """Import match statistics (corners) for completed matches using correct API approach."""
+    def import_match_statistics(self, league_id: int, season: int, limit: int = None) -> int:
+        """Import match statistics (corners) for completed matches in specific league using correct API approach."""
         try:
-            # Get completed matches from database that don't have corner data yet
-            completed_matches = self.db_manager.get_matches_needing_corner_stats(season, limit)
+            # Get league config
+            from data.league_manager import get_league_manager
+            league_manager = get_league_manager()
+            league_config = league_manager.get_league_by_id(league_id)
+            
+            if not league_config:
+                logger.error(f"League {league_id} not found")
+                return 0
+            
+            # Get completed matches from database that don't have corner data yet (league-specific)
+            completed_matches = self.db_manager.get_matches_needing_corner_stats(league_id, season, limit)
             
             if not completed_matches:
-                logger.info(f"No completed matches found for season {season}")
+                logger.info(f"No completed matches found for {league_config.name} season {season}")
                 return 0
             
             imported_count = 0
@@ -181,11 +269,11 @@ class DataImporter:
                     continue
                 
                 try:
-                    # Use the new corner-specific method
+                    # Use the corner-specific API method
                     corner_data = self.api_client.get_fixture_corner_statistics(match['api_fixture_id'])
                     
                     if not corner_data or corner_data['home_corners'] is None:
-                        logger.debug(f"No corner statistics found for match {match['api_fixture_id']}")
+                        logger.debug(f"No corner statistics found for match {match['api_fixture_id']} in {league_config.name}")
                         continue
                     
                     # Update match with corner data
@@ -197,7 +285,7 @@ class DataImporter:
                     
                     if success:
                         imported_count += 1
-                        logger.debug(f"Updated match {match['api_fixture_id']} with corners: {corner_data['home_corners']}-{corner_data['away_corners']}")
+                        logger.debug(f"Updated {league_config.name} match {match['api_fixture_id']} with corners: {corner_data['home_corners']}-{corner_data['away_corners']}")
                     else:
                         logger.warning(f"Failed to update match {match['api_fixture_id']} with corner data")
                 
@@ -206,10 +294,11 @@ class DataImporter:
                     continue
             
             self.imported_counts['statistics'] = imported_count
+            logger.info(f"Imported corner statistics for {imported_count} matches in {league_config.name} season {season}")
             return imported_count
             
         except Exception as e:
-            logger.error(f"Error importing match statistics for season {season}: {e}")
+            logger.error(f"Error importing match statistics for {league_config.name if league_config else league_id} season {season}: {e}")
             raise
     
     def import_recent_matches(self, days: int = 7) -> int:

@@ -14,6 +14,7 @@ from data.prediction_engine import predict_match_comprehensive, find_betting_opp
 from data.head_to_head_analyzer import analyze_head_to_head
 from data.prediction_storage import get_unverified_predictions_list, get_prediction_by_id
 from data.goal_analyzer import GoalAnalyzer
+from data.league_manager import get_league_manager
 from typing import Dict, Optional
 import logging
 logger = logging.getLogger(__name__)
@@ -85,22 +86,43 @@ def register_routes(app):
     
     @app.route('/api/fixtures/upcoming')
     def api_fixtures_upcoming():
-        """Get upcoming CSL fixtures with enhanced filtering and team matching."""
+        """Get upcoming fixtures with league filtering support."""
         try:
             client = get_api_client()
             db_manager = get_db_manager()
-            season = request.args.get('season', 2024, type=int)
+            league_manager = get_league_manager()
+            
+            # Get parameters - league_id is required for multi-league support
+            league_id = request.args.get('league_id', type=int)
+            season = request.args.get('season', type=int)
             filter_type = request.args.get('filter', '2weeks')
             
-            # Get upcoming fixtures from API (no season parameter)
-            fixtures_response = client.get_upcoming_fixtures()
+            # Default to CSL for backward compatibility
+            if not league_id:
+                league_id = Config.CHINA_SUPER_LEAGUE_ID
+            
+            # Get league configuration
+            league_config = league_manager.get_league_by_id(league_id)
+            if not league_config:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'League {league_id} not found',
+                    'data': {}
+                }), 404
+            
+            # Get current season if not provided
+            if not season:
+                season = league_manager.get_current_season(league_id)
+            
+            # Get upcoming fixtures for specific league
+            fixtures_response = client.get_upcoming_fixtures_by_league(league_config.api_league_id)
             fixtures = fixtures_response.get('response', [])
             
             if not fixtures:
                 return jsonify({
                     'status': 'success',
-                    'message': f'No upcoming fixtures found for season {season}',
-                    'data': {'fixtures': [], 'team_matching': None}
+                    'message': f'No upcoming fixtures found for {league_config.name} season {season}',
+                    'data': {'fixtures': [], 'team_matching': None, 'league_name': league_config.name}
                 })
             
             # Filter by date range
@@ -139,7 +161,7 @@ def register_routes(app):
                     logger.warning(f"Could not parse fixture date: {fixture.get('fixture', {}).get('date', 'N/A')} - {e}")
                     continue
             
-            # Format fixtures and check team matching
+            # Format fixtures and check team matching (league-specific)
             formatted_fixtures = []
             predictable_count = 0
             
@@ -147,7 +169,7 @@ def register_routes(app):
                 fixture_info = fixture.get('fixture', {})
                 teams = fixture.get('teams', {})
                 
-                # Check if teams exist in database
+                # Check if teams exist in database for this league
                 home_team_api_id = teams.get('home', {}).get('id')
                 away_team_api_id = teams.get('away', {}).get('id')
                 
@@ -156,8 +178,20 @@ def register_routes(app):
                 can_predict = False
                 
                 if home_team_api_id and away_team_api_id:
-                    home_team_db = db_manager.get_team_by_api_id(home_team_api_id, season)
-                    away_team_db = db_manager.get_team_by_api_id(away_team_api_id, season)
+                    # Look up teams in specific league and season
+                    with db_manager.get_connection() as conn:
+                        cursor = conn.execute("""
+                            SELECT id, name FROM teams 
+                            WHERE api_team_id = ? AND league_id = ? AND season = ?
+                        """, (home_team_api_id, league_id, season))
+                        home_team_db = cursor.fetchone()
+                        
+                        cursor = conn.execute("""
+                            SELECT id, name FROM teams 
+                            WHERE api_team_id = ? AND league_id = ? AND season = ?
+                        """, (away_team_api_id, league_id, season))
+                        away_team_db = cursor.fetchone()
+                    
                     can_predict = home_team_db is not None and away_team_db is not None
                 
                 if can_predict:
@@ -210,6 +244,48 @@ def register_routes(app):
                 'data': {'fixtures': [], 'team_matching': None}
             }), 500
     
+    @app.route('/api/leagues/active')
+    def api_active_leagues():
+        """Get all active leagues grouped by country for multi-league UI."""
+        try:
+            league_manager = get_league_manager()
+            leagues = league_manager.get_active_leagues()
+            
+            if not leagues:
+                return jsonify({
+                    'status': 'success',
+                    'message': 'No active leagues found',
+                    'data': {'leagues': []}
+                })
+            
+            # Format leagues with all necessary info for frontend
+            formatted_leagues = []
+            for league in leagues:
+                formatted_leagues.append({
+                    'id': league.id,
+                    'name': league.name,
+                    'country': league.country,
+                    'country_code': league.country_code,
+                    'api_league_id': league.api_league_id,
+                    'season_structure': league.season_structure,
+                    'priority_order': league.priority_order
+                })
+            
+            logger.info(f"Returning {len(formatted_leagues)} active leagues")
+            
+            return jsonify({
+                'status': 'success',
+                'data': {'leagues': formatted_leagues}
+            })
+            
+        except Exception as e:
+            logger.error(f"Error in active leagues endpoint: {e}")
+            return jsonify({
+                'status': 'error',
+                'message': f'Server error: {str(e)}',
+                'data': {}
+            }), 500
+    
     @app.route('/api/teams')
     def api_teams():
         """Get team list for dropdowns."""
@@ -217,7 +293,22 @@ def register_routes(app):
             season = request.args.get('season', 2024, type=int)
             db_manager = get_db_manager()
             
-            teams = db_manager.get_teams_by_season(season)
+            # Get league parameter for multi-league support
+            league_id = request.args.get('league_id', type=int)
+            if not league_id:
+                # Default to CSL (league_id = 1) for backward compatibility
+                league_id = 1  # Chinese Super League
+            
+            league_manager = get_league_manager()
+            league_config = league_manager.get_league_by_id(league_id)
+            if not league_config:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'League {league_id} not found',
+                    'data': {}
+                }), 404
+            
+            teams = db_manager.get_teams_by_season(league_id, season)
             
             if not teams:
                 return jsonify({
@@ -291,7 +382,29 @@ def register_routes(app):
             
             logger.info(f"Generating prediction for teams {home_team_id} vs {away_team_id} (season {season})")
             
-            # Generate comprehensive prediction
+            # Get league_id for multi-league support
+            league_id = data.get('league_id')
+            if league_id is not None:
+                try:
+                    league_id = int(league_id)
+                except (ValueError, TypeError):
+                    league_id = None
+            if not league_id:
+                # Try to determine league_id from team data
+                db_manager = get_db_manager()
+                with db_manager.get_connection() as conn:
+                    cursor = conn.execute("""
+                        SELECT league_id FROM teams WHERE id = ? LIMIT 1
+                    """, (home_team_id,))
+                    result = cursor.fetchone()
+                    if result:
+                        league_id = result['league_id']
+                    else:
+                        league_id = Config.CHINA_SUPER_LEAGUE_ID  # Default to CSL
+            
+            logger.info(f"Generating prediction for league {league_id}, teams {home_team_id} vs {away_team_id} (season {season})")
+            
+            # Generate comprehensive prediction (league_id stored in DB context)
             prediction = predict_match_comprehensive(home_team_id, away_team_id, season)
             
             if not prediction:
@@ -301,10 +414,14 @@ def register_routes(app):
                     'data': {}
                 }), 404
             
+            # Convert dataclass to dict for JSON serialization
+            from dataclasses import asdict
+            prediction_dict = asdict(prediction)
+            
             return jsonify({
                 'status': 'success',
                 'message': 'Prediction generated successfully',
-                'data': prediction
+                'data': prediction_dict
             })
             
         except Exception as e:

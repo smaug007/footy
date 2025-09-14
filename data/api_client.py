@@ -389,39 +389,47 @@ class APIFootballClient:
         }
         return self._make_request('/standings', params)
     
-    def get_china_super_league_fixtures(self, season: int = None, status: str = None) -> Dict:
-        """Get China Super League fixtures."""
+    def get_league_fixtures(self, league_id: int, season: int = None, status: str = None) -> Dict:
+        """Get fixtures for any league."""
         if season is None:
             season = datetime.now().year
             
-        return self.get_fixtures(Config.CHINA_SUPER_LEAGUE_ID, season, status)
+        return self.get_fixtures(league_id, season, status)
     
-    def get_china_super_league_teams(self, season: int = None) -> Dict:
-        """Get China Super League teams."""
+    def get_league_teams(self, league_id: int, season: int = None) -> Dict:
+        """Get teams for any league."""
         if season is None:
             season = datetime.now().year
             
-        return self.get_teams(Config.CHINA_SUPER_LEAGUE_ID, season)
+        return self.get_teams(league_id, season)
     
-    def get_china_super_league_standings(self, season: int = None) -> Dict:
-        """Get China Super League standings/table."""
+    def get_league_standings(self, league_id: int, season: int = None) -> Dict:
+        """Get standings/table for any league."""
         if season is None:
             season = datetime.now().year
             
-        return self.get_standings(Config.CHINA_SUPER_LEAGUE_ID, season)
+        return self.get_standings(league_id, season)
     
-    def get_upcoming_fixtures(self, days_ahead: int = 7) -> Dict:
-        """Get upcoming CSL fixtures within specified days."""
-        return self.get_china_super_league_fixtures(status='NS')  # Not Started
+    def get_upcoming_fixtures_by_league(self, league_id: int, days_ahead: int = 7) -> Dict:
+        """Get upcoming fixtures for any league within specified days."""
+        return self.get_league_fixtures(league_id, status='NS')  # Not Started
     
-    def get_completed_fixtures(self, season: int = None) -> Dict:
-        """Get completed CSL fixtures."""
-        return self.get_china_super_league_fixtures(season, status='FT')  # Full Time
+    def get_completed_fixtures_by_league(self, league_id: int, season: int = None) -> Dict:
+        """Get completed fixtures for any league."""
+        return self.get_league_fixtures(league_id, season, status='FT')  # Full Time
+    
+    def get_upcoming_fixtures(self, league_id: int = None, days_ahead: int = 7) -> Dict:
+        """Get upcoming fixtures (generic method for backward compatibility)."""
+        if league_id is None:
+            # Default to CSL for backward compatibility
+            league_id = Config.CHINA_SUPER_LEAGUE_ID
+        return self.get_upcoming_fixtures_by_league(league_id, days_ahead)
     
     def health_check(self) -> bool:
         """Check if API is accessible."""
         try:
-            response = self.get_leagues(country="China")
+            # Use a simple endpoint to check API health
+            response = self.get_leagues()
             return response.get('response') is not None
         except Exception as e:
             logger.error(f"Health check failed: {e}")

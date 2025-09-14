@@ -50,6 +50,24 @@ class DatabaseManager:
     def _create_tables(self, conn: sqlite3.Connection):
         """Create all database tables with proper schema."""
         
+        # Leagues table (MULTI-LEAGUE SUPPORT)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS leagues (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                country TEXT NOT NULL,
+                country_code TEXT NOT NULL,
+                api_league_id INTEGER UNIQUE NOT NULL,
+                season_structure TEXT NOT NULL CHECK (season_structure IN ('calendar_year', 'academic_year', 'custom')),
+                season_start_month INTEGER DEFAULT 1,
+                season_end_month INTEGER DEFAULT 12,
+                active BOOLEAN DEFAULT TRUE,
+                priority_order INTEGER DEFAULT 100,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         # Teams table
         conn.execute("""
             CREATE TABLE IF NOT EXISTS teams (
@@ -64,6 +82,7 @@ class DatabaseManager:
                 venue_capacity INTEGER,
                 venue_city TEXT,
                 season INTEGER NOT NULL,
+                league_id INTEGER REFERENCES leagues(id),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -87,10 +106,12 @@ class DatabaseManager:
                 status TEXT NOT NULL,
                 referee TEXT,
                 attendance INTEGER,
+                league_id INTEGER REFERENCES leagues(id),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (home_team_id) REFERENCES teams (id),
-                FOREIGN KEY (away_team_id) REFERENCES teams (id)
+                FOREIGN KEY (away_team_id) REFERENCES teams (id),
+                FOREIGN KEY (league_id) REFERENCES leagues (id)
             )
         """)
         
@@ -139,8 +160,10 @@ class DatabaseManager:
                 away_team_score_probability REAL,
                 analysis_report TEXT,
                 season INTEGER NOT NULL,
+                league_id INTEGER REFERENCES leagues(id),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (match_id) REFERENCES matches (id)
+                FOREIGN KEY (match_id) REFERENCES matches (id),
+                FOREIGN KEY (league_id) REFERENCES leagues (id)
             )
         """)
         
@@ -154,6 +177,73 @@ class DatabaseManager:
             conn.execute("ALTER TABLE predictions ADD COLUMN away_team_score_probability REAL")
         except sqlite3.OperationalError:
             pass  # Column already exists
+
+        # Add league_id columns to existing tables (MULTI-LEAGUE SUPPORT)
+        try:
+            conn.execute("ALTER TABLE teams ADD COLUMN league_id INTEGER REFERENCES leagues(id)")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+        try:
+            conn.execute("ALTER TABLE matches ADD COLUMN league_id INTEGER REFERENCES leagues(id)")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+        try:
+            conn.execute("ALTER TABLE predictions ADD COLUMN league_id INTEGER REFERENCES leagues(id)")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+        try:
+            conn.execute("ALTER TABLE prediction_results ADD COLUMN league_id INTEGER REFERENCES leagues(id)")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+        try:
+            conn.execute("ALTER TABLE team_accuracy_stats ADD COLUMN league_id INTEGER REFERENCES leagues(id)")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+        try:
+            conn.execute("ALTER TABLE team_accuracy_history ADD COLUMN league_id INTEGER REFERENCES leagues(id)")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+        try:
+            conn.execute("ALTER TABLE date_based_backtests ADD COLUMN league_id INTEGER REFERENCES leagues(id)")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+        # Insert initial league data (MULTI-LEAGUE SUPPORT)
+        try:
+            # Insert CSL (existing) with fixed ID
+            conn.execute("""
+                INSERT OR IGNORE INTO leagues (id, name, country, country_code, api_league_id, season_structure, priority_order) 
+                VALUES (1, 'Chinese Super League', 'China', 'CN', 169, 'calendar_year', 1)
+            """)
+
+            # Insert Phase 1 leagues
+            conn.execute("""
+                INSERT OR IGNORE INTO leagues (name, country, country_code, api_league_id, season_structure, priority_order) VALUES
+                ('La Liga', 'Spain', 'ES', 140, 'academic_year', 2),
+                ('Segunda División', 'Spain', 'ES', 141, 'academic_year', 3),
+                ('Serie A', 'Italy', 'IT', 135, 'academic_year', 4),
+                ('Serie B', 'Italy', 'IT', 136, 'academic_year', 5),
+                ('Ligue 1', 'France', 'FR', 61, 'academic_year', 6)
+            """)
+
+            # Update existing CSL data with league_id = 1
+            conn.execute("UPDATE teams SET league_id = 1 WHERE league_id IS NULL")
+            conn.execute("UPDATE matches SET league_id = 1 WHERE league_id IS NULL")
+            conn.execute("UPDATE predictions SET league_id = 1 WHERE league_id IS NULL")
+            conn.execute("UPDATE prediction_results SET league_id = 1 WHERE league_id IS NULL")
+            conn.execute("UPDATE team_accuracy_stats SET league_id = 1 WHERE league_id IS NULL")
+            conn.execute("UPDATE team_accuracy_history SET league_id = 1 WHERE league_id IS NULL")
+            conn.execute("UPDATE date_based_backtests SET league_id = 1 WHERE league_id IS NULL")
+
+            logger.info("Initial league data inserted and existing CSL data updated with league_id = 1")
+        except Exception as e:
+            logger.warning(f"League data initialization issue (likely already exists): {e}")
         
         # Prediction Results table (Accuracy Tracking)
         conn.execute("""
@@ -241,18 +331,37 @@ class DatabaseManager:
         """)
 
         
-        # Create indexes for better performance
+        # Create indexes for better performance (UPDATED FOR MULTI-LEAGUE SUPPORT)
         indexes = [
+            # Leagues indexes
+            "CREATE INDEX IF NOT EXISTS idx_leagues_api_id ON leagues (api_league_id)",
+            "CREATE INDEX IF NOT EXISTS idx_leagues_country ON leagues (country_code)",
+            "CREATE INDEX IF NOT EXISTS idx_leagues_active ON leagues (active, priority_order)",
+            
+            # Teams indexes (updated for multi-league)
             "CREATE INDEX IF NOT EXISTS idx_teams_api_id ON teams (api_team_id)",
             "CREATE INDEX IF NOT EXISTS idx_teams_season ON teams (season)",
+            "CREATE INDEX IF NOT EXISTS idx_teams_league_season ON teams (league_id, season)",
+            "CREATE INDEX IF NOT EXISTS idx_teams_league_api ON teams (league_id, api_team_id)",
+            
+            # Matches indexes (updated for multi-league)
             "CREATE INDEX IF NOT EXISTS idx_matches_api_id ON matches (api_fixture_id)",
             "CREATE INDEX IF NOT EXISTS idx_matches_date ON matches (match_date)",
             "CREATE INDEX IF NOT EXISTS idx_matches_season ON matches (season)",
             "CREATE INDEX IF NOT EXISTS idx_matches_teams ON matches (home_team_id, away_team_id)",
+            "CREATE INDEX IF NOT EXISTS idx_matches_league_season ON matches (league_id, season)",
+            "CREATE INDEX IF NOT EXISTS idx_matches_league_date ON matches (league_id, match_date)",
+            
+            # Predictions indexes (updated for multi-league)
             "CREATE INDEX IF NOT EXISTS idx_predictions_match ON predictions (match_id)",
             "CREATE INDEX IF NOT EXISTS idx_predictions_season ON predictions (season)",
+            "CREATE INDEX IF NOT EXISTS idx_predictions_league_season ON predictions (league_id, season)",
+            
+            # Accuracy indexes (updated for multi-league)
             "CREATE INDEX IF NOT EXISTS idx_accuracy_stats_team ON team_accuracy_stats (team_id, season)",
-            "CREATE INDEX IF NOT EXISTS idx_accuracy_history_team ON team_accuracy_history (team_id, season)"
+            "CREATE INDEX IF NOT EXISTS idx_accuracy_stats_league ON team_accuracy_stats (league_id, team_id, season)",
+            "CREATE INDEX IF NOT EXISTS idx_accuracy_history_team ON team_accuracy_history (team_id, season)",
+            "CREATE INDEX IF NOT EXISTS idx_accuracy_history_league ON team_accuracy_history (league_id, team_id, season)"
         ]
         
         for index_sql in indexes:
@@ -265,10 +374,10 @@ class DatabaseManager:
     def insert_team(self, team_data: Dict) -> int:
         """Insert a new team or update existing one."""
         with self.get_connection() as conn:
-            # First, check if team already exists for this season
+            # First, check if team already exists for this league and season
             cursor = conn.execute("""
-                SELECT id FROM teams WHERE api_team_id = ? AND season = ?
-            """, (team_data['api_team_id'], team_data['season']))
+                SELECT id FROM teams WHERE api_team_id = ? AND league_id = ? AND season = ?
+            """, (team_data['api_team_id'], team_data['league_id'], team_data['season']))
             
             existing_team = cursor.fetchone()
             
@@ -278,7 +387,7 @@ class DatabaseManager:
                     UPDATE teams SET 
                         name = ?, code = ?, country = ?, logo_url = ?, founded = ?,
                         venue_name = ?, venue_capacity = ?, venue_city = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE api_team_id = ? AND season = ?
+                    WHERE api_team_id = ? AND league_id = ? AND season = ?
                 """, (
                     team_data['name'],
                     team_data.get('code'),
@@ -289,6 +398,7 @@ class DatabaseManager:
                     team_data.get('venue_capacity'),
                     team_data.get('venue_city'),
                     team_data['api_team_id'],
+                    team_data['league_id'],
                     team_data['season']
                 ))
                 conn.commit()
@@ -298,8 +408,8 @@ class DatabaseManager:
                 cursor = conn.execute("""
                     INSERT INTO teams (
                         api_team_id, name, code, country, logo_url, founded,
-                        venue_name, venue_capacity, venue_city, season, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        venue_name, venue_capacity, venue_city, season, league_id, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """, (
                     team_data['api_team_id'],
                     team_data['name'],
@@ -310,7 +420,8 @@ class DatabaseManager:
                     team_data.get('venue_name'),
                     team_data.get('venue_capacity'),
                     team_data.get('venue_city'),
-                    team_data['season']
+                    team_data['season'],
+                    team_data['league_id']
                 ))
                 conn.commit()
                 return cursor.lastrowid
@@ -341,12 +452,12 @@ class DatabaseManager:
             row = cursor.fetchone()
             return dict(row) if row else None
     
-    def get_teams_by_season(self, season: int) -> List[Dict]:
-        """Get all teams for a season."""
+    def get_teams_by_season(self, league_id: int, season: int) -> List[Dict]:
+        """Get all teams for a specific league and season."""
         with self.get_connection() as conn:
             cursor = conn.execute(
-                "SELECT * FROM teams WHERE season = ? ORDER BY name",
-                (season,)
+                "SELECT * FROM teams WHERE league_id = ? AND season = ? ORDER BY name",
+                (league_id, season)
             )
             return [dict(row) for row in cursor.fetchall()]
     
@@ -358,8 +469,8 @@ class DatabaseManager:
                 INSERT OR REPLACE INTO matches (
                     api_fixture_id, home_team_id, away_team_id, match_date,
                     venue_name, corners_home, corners_away, season, status,
-                    referee, attendance, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    referee, attendance, league_id, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """, (
                 match_data['api_fixture_id'],
                 match_data['home_team_id'],
@@ -371,7 +482,8 @@ class DatabaseManager:
                 match_data['season'],
                 match_data['status'],
                 match_data.get('referee'),
-                match_data.get('attendance')
+                match_data.get('attendance'),
+                match_data['league_id']
             ))
             conn.commit()
             return cursor.lastrowid
@@ -389,8 +501,8 @@ class DatabaseManager:
             row = cursor.fetchone()
             return dict(row) if row else None
     
-    def get_team_matches(self, team_id: int, season: int, limit: int = None) -> List[Dict]:
-        """Get matches for a team in a season."""
+    def get_team_matches(self, team_id: int, league_id: int, season: int, limit: int = None) -> List[Dict]:
+        """Get matches for a team in a specific league and season."""
         with self.get_connection() as conn:
             sql = """
                 SELECT m.*, ht.name as home_team_name, at.name as away_team_name
@@ -398,10 +510,10 @@ class DatabaseManager:
                 JOIN teams ht ON m.home_team_id = ht.id
                 JOIN teams at ON m.away_team_id = at.id
                 WHERE (m.home_team_id = ? OR m.away_team_id = ?) 
-                AND m.season = ? AND m.status = 'FT'
+                AND m.league_id = ? AND m.season = ? AND m.status = 'FT'
                 ORDER BY m.match_date DESC
             """
-            params = [team_id, team_id, season]
+            params = [team_id, team_id, league_id, season]
             
             if limit:
                 sql += " LIMIT ?"
@@ -410,8 +522,8 @@ class DatabaseManager:
             cursor = conn.execute(sql, params)
             return [dict(row) for row in cursor.fetchall()]
     
-    def get_team_matches_before_date(self, team_id: int, season: int, cutoff_date, limit: int = None) -> List[Dict]:
-        """Get matches for a team in a season BEFORE a specific cutoff date (for time-travel predictions)."""
+    def get_team_matches_before_date(self, team_id: int, league_id: int, season: int, cutoff_date, limit: int = None) -> List[Dict]:
+        """Get matches for a team in a specific league and season BEFORE a specific cutoff date (for time-travel predictions)."""
         from datetime import date
         
         # Convert cutoff_date to date object if it's a string
@@ -426,11 +538,11 @@ class DatabaseManager:
                 JOIN teams ht ON m.home_team_id = ht.id
                 JOIN teams at ON m.away_team_id = at.id
                 WHERE (m.home_team_id = ? OR m.away_team_id = ?) 
-                AND m.season = ? AND m.status = 'FT'
+                AND m.league_id = ? AND m.season = ? AND m.status = 'FT'
                 AND date(m.match_date) < ?
                 ORDER BY m.match_date DESC
             """
-            params = [team_id, team_id, season, cutoff_date]
+            params = [team_id, team_id, league_id, season, cutoff_date]
             
             if limit:
                 sql += " LIMIT ?"
@@ -439,21 +551,21 @@ class DatabaseManager:
             cursor = conn.execute(sql, params)
             matches = [dict(row) for row in cursor.fetchall()]
             
-            logger.debug(f"Retrieved {len(matches)} matches for team {team_id} before {cutoff_date}")
+            logger.debug(f"Retrieved {len(matches)} matches for team {team_id} in league {league_id} before {cutoff_date}")
             return matches
     
-    def get_completed_matches(self, season: int, limit: int = None) -> List[Dict]:
-        """Get completed matches for a season (with corner data)."""
+    def get_completed_matches(self, league_id: int, season: int, limit: int = None) -> List[Dict]:
+        """Get completed matches for a specific league and season (with corner data)."""
         with self.get_connection() as conn:
             sql = """
                 SELECT m.*, ht.name as home_team_name, at.name as away_team_name
                 FROM matches m
                 JOIN teams ht ON m.home_team_id = ht.id
                 JOIN teams at ON m.away_team_id = at.id
-                WHERE m.season = ? AND m.status = 'FT' AND m.corners_home IS NOT NULL
+                WHERE m.league_id = ? AND m.season = ? AND m.status = 'FT' AND m.corners_home IS NOT NULL
                 ORDER BY m.match_date DESC
             """
-            params = [season]
+            params = [league_id, season]
             
             if limit:
                 sql += " LIMIT ?"
@@ -462,18 +574,18 @@ class DatabaseManager:
             cursor = conn.execute(sql, params)
             return [dict(row) for row in cursor.fetchall()]
     
-    def get_matches_needing_corner_stats(self, season: int, limit: int = None) -> List[Dict]:
-        """Get completed matches that need corner statistics imported."""
+    def get_matches_needing_corner_stats(self, league_id: int, season: int, limit: int = None) -> List[Dict]:
+        """Get completed matches that need corner statistics imported for a specific league."""
         with self.get_connection() as conn:
             sql = """
                 SELECT m.*, ht.name as home_team_name, at.name as away_team_name
                 FROM matches m
                 JOIN teams ht ON m.home_team_id = ht.id
                 JOIN teams at ON m.away_team_id = at.id
-                WHERE m.season = ? AND m.status = 'FT' AND m.corners_home IS NULL
+                WHERE m.league_id = ? AND m.season = ? AND m.status = 'FT' AND m.corners_home IS NULL
                 ORDER BY m.match_date DESC
             """
-            params = [season]
+            params = [league_id, season]
             
             if limit:
                 sql += " LIMIT ?"
@@ -601,8 +713,8 @@ class DatabaseManager:
                 logger.info(f"Inserted new prediction for match {prediction_data['match_id']}")
                 return cursor.lastrowid
     
-    def get_predictions_by_season(self, season: int) -> List[Dict]:
-        """Get all predictions for a season."""
+    def get_predictions_by_season(self, league_id: int, season: int) -> List[Dict]:
+        """Get all predictions for a specific league and season."""
         with self.get_connection() as conn:
             cursor = conn.execute("""
                 SELECT p.*, m.api_fixture_id, ht.name as home_team_name, at.name as away_team_name
@@ -610,9 +722,9 @@ class DatabaseManager:
                 JOIN matches m ON p.match_id = m.id
                 JOIN teams ht ON m.home_team_id = ht.id
                 JOIN teams at ON m.away_team_id = at.id
-                WHERE p.season = ?
+                WHERE p.league_id = ? AND p.season = ?
                 ORDER BY p.created_at DESC
-            """, (season,))
+            """, (league_id, season))
             return [dict(row) for row in cursor.fetchall()]
     
     # ACCURACY TRACKING OPERATIONS

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Corner Predictions - China Super League{% endblock %}
+{% block title %}Corner Predictions - Multi-League{% endblock %}
 
 {% block content %}
 
@@ -62,7 +62,7 @@
         <div class="card">
             <div class="card-header bg-primary text-white">
                 <h4 class="mb-0">
-                    <i class="fas fa-futbol"></i> China Super League Corner Predictions
+                    <i class="fas fa-futbol"></i> Multi-League Corner Predictions
                 </h4>
             </div>
             <div class="card-body">
@@ -122,13 +122,13 @@
                             </div>
                         </div>
 
-                        <!-- Fixtures List Container -->
-                        <div id="fixtures-container">
-                            <div class="text-center">
+                        <!-- Multi-League Fixtures Container -->
+                        <div id="multi-league-container">
+                            <div class="text-center" id="league-loading">
                                 <div class="spinner-border text-primary" role="status">
-                                    <span class="visually-hidden">Loading fixtures...</span>
+                                    <span class="visually-hidden">Loading leagues...</span>
                                 </div>
-                                <p class="mt-2 text-muted">Loading upcoming fixtures...</p>
+                                <p class="mt-2 text-muted">Loading league fixtures...</p>
                             </div>
                         </div>
                     </div>
@@ -451,94 +451,237 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // Load fixtures for the fixtures tab
-async function loadFixtures() {
-    console.log('🔍 DEBUG: loadFixtures() called');
-    
-    const fixturesContainer = document.getElementById('fixtures-container');
-    const fixturesSeasonSelect = document.getElementById('fixtures-season-select');
-    const selectedFilter = document.querySelector('input[name="dateFilter"]:checked');
-    
-    const season = fixturesSeasonSelect.value || 2025;
-    const filter = selectedFilter ? selectedFilter.value : '2weeks';
-    
-    console.log('🔍 DEBUG: Parameters:', {season, filter});
+// Load fixtures for all active leagues
+async function loadAllLeagueFixtures() {
+    const season = document.getElementById('fixtures-season-select').value || 2025;
+    const filter = document.querySelector('input[name="dateFilter"]:checked')?.value || '2weeks';
+    const container = document.getElementById('multi-league-container');
     
     try {
         // Check if CSLPredictions exists
         if (typeof CSLPredictions === 'undefined') {
             console.error('❌ CSLPredictions is not defined!');
-            fixturesContainer.innerHTML = '<div class="alert alert-danger">JavaScript error: CSLPredictions not loaded</div>';
+            container.innerHTML = '<div class="alert alert-danger">JavaScript error: CSLPredictions not loaded</div>';
             return;
         }
         
-        console.log('✅ CSLPredictions available:', Object.keys(CSLPredictions));
+        console.log('✅ Loading multi-league fixtures...');
         
-        // Show loading
-        CSLPredictions.showLoading(fixturesContainer, { 
-            overlay: true, 
-            message: 'Loading fixtures...' 
+        // Get all active leagues
+        const leaguesResponse = await CSLPredictions.apiRequest('/api/leagues/active');
+        
+        if (leaguesResponse.status !== 'success') {
+            throw new Error('Failed to load active leagues');
+        }
+        
+        const leagues = leaguesResponse.data.leagues;
+        console.log(`Found ${leagues.length} active leagues`);
+        
+        // Group leagues by country
+        const leaguesByCountry = {};
+        leagues.forEach(league => {
+            if (!leaguesByCountry[league.country_code]) {
+                leaguesByCountry[league.country_code] = {
+                    country: league.country,
+                    country_code: league.country_code,
+                    leagues: []
+                };
+            }
+            leaguesByCountry[league.country_code].leagues.push(league);
         });
         
-        console.log('🔍 DEBUG: Making API request...');
-        const response = await CSLPredictions.apiRequest(`/api/fixtures/upcoming?season=${season}&filter=${filter}`);
-        console.log('🔍 DEBUG: API response:', response);
+        let html = '';
         
-        if (response.status === 'success') {
-            const fixtures = response.data.fixtures || [];
+        // Generate nested country/league structure
+        for (const [countryCode, countryData] of Object.entries(leaguesByCountry)) {
+            const countryFlag = getCountryFlag(countryCode);
             
-            if (fixtures.length > 0) {
-                let fixturesHTML = `
-                    <div class="row">
-                        <div class="col-12">
-                            <div class="alert fixtures-info-alert">
-                                <i class="fas fa-info-circle"></i>
-                                Found <strong>${fixtures.length} fixtures</strong> for ${filter} in ${season} season.
-                                ${response.data.team_matching ? `${response.data.team_matching.predictable_fixtures} are ready for prediction.` : ''}
+            html += `
+                <div class="country-section mb-4" data-country="${countryCode}">
+                    <div class="country-header" onclick="toggleCountry('${countryCode}')" style="cursor: pointer;">
+                        <h5 class="mb-0 p-3 bg-light border rounded d-flex justify-content-between align-items-center">
+                            <span><span class="flag me-2">${countryFlag}</span> ${countryData.country}</span>
+                            <i class="fas fa-chevron-down transition-icon" id="icon-${countryCode}"></i>
+                        </h5>
+                            </div>
+                    <div class="country-content collapse show" id="country-${countryCode}">
+            `;
+            
+            // Load fixtures for each league in this country
+            for (const league of countryData.leagues) {
+                html += `
+                    <div class="league-section mt-3 ms-3" data-league-id="${league.id}">
+                        <h6 class="text-primary mb-3">
+                            <i class="fas fa-trophy"></i> ${league.name}
+                        </h6>
+                        <div id="fixtures-league-${league.id}" class="fixtures-container">
+                            <div class="text-center">
+                                <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                    <span class="visually-hidden">Loading ${league.name}...</span>
+                                </div>
+                                <small class="text-muted ms-2">Loading ${league.name} fixtures...</small>
                             </div>
                         </div>
                     </div>
                 `;
-                
-                // Show initial fixtures with loading predictions
+            }
+            
+            html += `
+                    </div>
+                </div>
+            `;
+        }
+        
+        container.innerHTML = html;
+        
+        // Load fixtures for each league
+        for (const [countryCode, countryData] of Object.entries(leaguesByCountry)) {
+            for (const league of countryData.leagues) {
+                await loadLeagueFixtures(league.id, season, filter);
+            }
+        }
+        
+        // Hide initial loading
+        const loadingElement = document.getElementById('league-loading');
+        if (loadingElement) loadingElement.style.display = 'none';
+        
+    } catch (error) {
+        console.error('Error loading multi-league fixtures:', error);
+        container.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-triangle"></i>
+                Failed to load league fixtures. <a href="javascript:loadAllLeagueFixtures()">Try again</a>
+            </div>
+        `;
+    }
+}
+
+// Load fixtures for a specific league with automatic predictions (restored from working baseline)
+async function loadLeagueFixtures(leagueId, season, filter) {
+    const fixturesContainer = document.getElementById(`fixtures-league-${leagueId}`);
+    
+    try {
+        const response = await CSLPredictions.apiRequest(`/api/fixtures/upcoming?league_id=${leagueId}&season=${season}&filter=${filter}`);
+        
+        if (response.status === 'success' && response.data.fixtures.length > 0) {
+            const fixtures = response.data.fixtures.sort((a, b) => new Date(a.date) - new Date(b.date));
+            
+            // Step 1: Display fixtures with loading predictions initially
                 displayFixturesWithLoadingPredictions(fixtures, filter, season, fixturesContainer);
                 
-                // Generate predictions for predictable fixtures
+            // Step 2: Generate predictions for predictable fixtures (like the working baseline)
                 const predictableFixtures = fixtures.filter(f => f.can_predict);
                 if (predictableFixtures.length > 0) {
-                    generateBatchPredictions(predictableFixtures, season).then(predictions => {
+                console.log(`🔮 Generating automatic predictions for ${predictableFixtures.length} fixtures in league ${leagueId}`);
+                
+                try {
+                    const predictions = await generateBatchPredictions(predictableFixtures, season);
+                    console.log(`✅ Generated ${Object.keys(predictions).length} predictions for league ${leagueId}`);
+                    
+                    // Step 3: Display fixtures with actual prediction results
                         displayFixturesWithPredictions(fixtures, predictions, filter, season, fixturesContainer);
-                    }).catch(error => {
-                        console.error('Error generating batch predictions:', error);
-                    });
+                } catch (predictionError) {
+                    console.error(`Error generating predictions for league ${leagueId}:`, predictionError);
+                    // Fallback to basic display if predictions fail
+                    displayBasicFixtures(fixtures, fixturesContainer);
+                }
+            } else {
+                console.log(`ℹ️ No predictable fixtures found for league ${leagueId}`);
                 }
             } else {
                 fixturesContainer.innerHTML = `
-                    <div class="fixtures-empty-state">
-                        <i class="fas fa-calendar-times fa-3x"></i>
-                        <h5>No Fixtures Found</h5>
-                        <p>No upcoming fixtures found for ${filter} in ${season} season.</p>
-                        <small>Try selecting a different time period or season.</small>
+                <div class="text-center text-muted py-3">
+                    <small><i class="fas fa-calendar-times"></i> No upcoming fixtures</small>
                     </div>
                 `;
-            }
-        } else {
-            throw new Error(response.message || 'Failed to load fixtures');
         }
     } catch (error) {
+        console.error(`Error loading fixtures for league ${leagueId}:`, error);
         fixturesContainer.innerHTML = `
-            <div class="alert alert-danger">
-                <i class="fas fa-exclamation-triangle"></i>
-                <strong>Error loading fixtures:</strong> ${error.message}
-                <br>
-                <button class="btn btn-outline-danger btn-sm mt-2" onclick="loadFixtures()">
-                    <i class="fas fa-redo"></i> Try Again
-                </button>
+            <div class="alert alert-warning alert-sm">
+                <small>Failed to load fixtures</small>
             </div>
         `;
-        console.error('Failed to load fixtures:', error);
-    } finally {
-        CSLPredictions.hideLoading(fixturesContainer);
     }
+}
+
+// Fallback function for basic fixture display (without predictions)
+function displayBasicFixtures(fixtures, container) {
+    let html = '';
+    fixtures.forEach(fixture => {
+        const matchDate = new Date(fixture.date);
+        const timeStr = matchDate.toLocaleTimeString('en-US', { 
+            hour: '2-digit', 
+            minute: '2-digit',
+            hour12: false 
+        });
+        const dateStr = matchDate.toLocaleDateString('en-US', { 
+            month: 'short', 
+            day: 'numeric' 
+        });
+        
+        html += `
+            <div class="fixture-card border rounded p-2 mb-2 shadow-sm" data-fixture-id="${fixture.id}">
+                <div class="row align-items-center">
+                    <div class="col-md-8">
+                        <div class="match-info">
+                            <div class="d-flex align-items-center">
+                                <span class="team-name small">${fixture.home_team.name}</span>
+                                <span class="vs text-muted mx-1">vs</span>
+                                <span class="team-name small">${fixture.away_team.name}</span>
+                            </div>
+                            <small class="text-muted">
+                                <i class="fas fa-clock"></i> ${dateStr} ${timeStr}
+                            </small>
+                        </div>
+                    </div>
+                    <div class="col-md-4 text-end">
+                        <span class="text-muted small">Analysis unavailable</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    container.innerHTML = html;
+}
+
+// Toggle country section
+function toggleCountry(countryCode) {
+    const content = document.getElementById(`country-${countryCode}`);
+    const icon = document.getElementById(`icon-${countryCode}`);
+    
+    if (content.classList.contains('show')) {
+        content.classList.remove('show');
+        icon.classList.remove('fa-chevron-down');
+        icon.classList.add('fa-chevron-right');
+    } else {
+        content.classList.add('show');
+        icon.classList.remove('fa-chevron-right');
+        icon.classList.add('fa-chevron-down');
+    }
+}
+
+// Get country flag emoji
+function getCountryFlag(countryCode) {
+    const flags = {
+        'CN': '🇨🇳',
+        'ES': '🇪🇸', 
+        'IT': '🇮🇹',
+        'FR': '🇫🇷',
+        'GB': '🇬🇧',
+        'DE': '🇩🇪',
+        'BR': '🇧🇷',
+        'AR': '🇦🇷',
+        'JP': '🇯🇵',
+        'KR': '🇰🇷'
+    };
+    return flags[countryCode] || '🌍';
+}
+
+// Backward compatibility - redirect to new function
+async function loadFixtures() {
+    console.log('🔍 DEBUG: loadFixtures() called - redirecting to multi-league version');
+    return await loadAllLeagueFixtures();
 }
 
 // Predict from fixture (called when clicking predict button in fixtures)
@@ -1186,8 +1329,11 @@ async function loadTeams() {
     const seasonSelect = document.getElementById('season-select');
     const selectedSeason = seasonSelect.value || 2025;
     
+    // Default to Chinese Super League for now (we can make this dynamic later)
+    const currentLeague = 1;
+    
     try {
-        const response = await CSLPredictions.apiRequest(`/api/teams?season=${selectedSeason}`);
+        const response = await CSLPredictions.apiRequest(`/api/teams?season=${selectedSeason}&league_id=${currentLeague}`);
         
         if (response.status === 'success' && response.data.teams.length > 0) {
             // Clear loading options

@@ -269,9 +269,19 @@ class ConsistencyAnalyzer:
                                          line_value: float, db_manager) -> Tuple[float, Dict]:
         """Calculate dynamic confidence for a specific line based on team performance."""
         
-        # Get historical matches for both teams
-        home_matches = db_manager.get_team_matches(home_analysis.team_id, home_analysis.season, limit=20)
-        away_matches = db_manager.get_team_matches(away_analysis.team_id, away_analysis.season, limit=20)
+        # Get historical matches for both teams (need league_id for multi-league support)
+        # For now, we'll determine league_id from the team's data
+        with db_manager.get_connection() as conn:
+            cursor = conn.execute("SELECT league_id FROM teams WHERE id = ? LIMIT 1", (home_analysis.team_id,))
+            home_league_result = cursor.fetchone()
+            home_league_id = home_league_result['league_id'] if home_league_result else 1  # Default to CSL
+            
+            cursor = conn.execute("SELECT league_id FROM teams WHERE id = ? LIMIT 1", (away_analysis.team_id,))
+            away_league_result = cursor.fetchone()  
+            away_league_id = away_league_result['league_id'] if away_league_result else 1  # Default to CSL
+        
+        home_matches = db_manager.get_team_matches(home_analysis.team_id, home_league_id, home_analysis.season, limit=20)
+        away_matches = db_manager.get_team_matches(away_analysis.team_id, away_league_id, away_analysis.season, limit=20)
         
         # Calculate individual team line performance with venue weighting
         home_line_rate = self._calculate_team_line_performance(home_matches, home_analysis.team_id, line_value, is_home_team=True)
@@ -408,9 +418,19 @@ class ConsistencyAnalyzer:
                                          home_games: int, away_games: int) -> float:
         """Calculate consistency factor using pure line consistency method."""
         
-        # Get historical matches to calculate line consistency
-        home_matches = self.db_manager.get_team_matches(home_analysis.team_id, home_analysis.season, limit=20)
-        away_matches = self.db_manager.get_team_matches(away_analysis.team_id, away_analysis.season, limit=20)
+        # Get historical matches to calculate line consistency (need league_id for multi-league support)
+        # For now, we'll determine league_id from the team's data
+        with self.db_manager.get_connection() as conn:
+            cursor = conn.execute("SELECT league_id FROM teams WHERE id = ? LIMIT 1", (home_analysis.team_id,))
+            home_league_result = cursor.fetchone()
+            home_league_id = home_league_result['league_id'] if home_league_result else 1  # Default to CSL
+            
+            cursor = conn.execute("SELECT league_id FROM teams WHERE id = ? LIMIT 1", (away_analysis.team_id,))
+            away_league_result = cursor.fetchone()
+            away_league_id = away_league_result['league_id'] if away_league_result else 1  # Default to CSL
+            
+        home_matches = self.db_manager.get_team_matches(home_analysis.team_id, home_league_id, home_analysis.season, limit=20)
+        away_matches = self.db_manager.get_team_matches(away_analysis.team_id, away_league_id, away_analysis.season, limit=20)
         
         # Calculate line consistency for Over 5.5 (our primary line)
         home_line_consistency = self._calculate_pure_line_consistency(home_matches, home_analysis.team_id, 5.5)
