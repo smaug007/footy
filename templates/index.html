@@ -511,15 +511,20 @@ async function loadAllLeagueFixtures() {
             for (const league of countryData.leagues) {
                 html += `
                     <div class="league-section mt-3 ms-3" data-league-id="${league.id}">
-                        <h6 class="text-primary mb-3">
-                            <i class="fas fa-trophy"></i> ${league.name}
-                        </h6>
-                        <div id="fixtures-league-${league.id}" class="fixtures-container">
-                            <div class="text-center">
-                                <div class="spinner-border spinner-border-sm text-primary" role="status">
-                                    <span class="visually-hidden">Loading ${league.name}...</span>
+                        <div class="league-header" onclick="toggleLeague('${countryCode}-${league.id}')" style="cursor: pointer;">
+                            <h6 class="text-primary mb-3 d-flex justify-content-between align-items-center">
+                                <span><i class="fas fa-trophy"></i> ${league.name}</span>
+                                <i class="fas fa-chevron-down transition-icon" id="league-icon-${countryCode}-${league.id}"></i>
+                            </h6>
+                        </div>
+                        <div class="league-content collapse show" id="league-${countryCode}-${league.id}">
+                            <div id="fixtures-league-${league.id}" class="fixtures-container">
+                                <div class="text-center">
+                                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                        <span class="visually-hidden">Loading ${league.name}...</span>
+                                    </div>
+                                    <small class="text-muted ms-2">Loading ${league.name} fixtures...</small>
                                 </div>
-                                <small class="text-muted ms-2">Loading ${league.name} fixtures...</small>
                             </div>
                         </div>
                     </div>
@@ -649,6 +654,22 @@ function displayBasicFixtures(fixtures, container) {
 function toggleCountry(countryCode) {
     const content = document.getElementById(`country-${countryCode}`);
     const icon = document.getElementById(`icon-${countryCode}`);
+    
+    if (content.classList.contains('show')) {
+        content.classList.remove('show');
+        icon.classList.remove('fa-chevron-down');
+        icon.classList.add('fa-chevron-right');
+    } else {
+        content.classList.add('show');
+        icon.classList.remove('fa-chevron-right');
+        icon.classList.add('fa-chevron-down');
+    }
+}
+
+// Toggle league section
+function toggleLeague(leagueIdentifier) {
+    const content = document.getElementById(`league-${leagueIdentifier}`);
+    const icon = document.getElementById(`league-icon-${leagueIdentifier}`);
     
     if (content.classList.contains('show')) {
         content.classList.remove('show');
