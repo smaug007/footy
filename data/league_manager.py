@@ -40,7 +40,7 @@ class LeagueManager:
                 cursor = conn.execute("""
                     SELECT id, name, country, country_code, api_league_id, 
                            season_structure, season_start_month, season_end_month, 
-                           active, priority_order
+                           COALESCE(is_active, active, 1) as active, priority_order
                     FROM leagues 
                     ORDER BY priority_order, name
                 """)

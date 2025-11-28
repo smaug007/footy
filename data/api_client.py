@@ -412,7 +412,30 @@ class APIFootballClient:
     
     def get_upcoming_fixtures_by_league(self, league_id: int, days_ahead: int = 7) -> Dict:
         """Get upcoming fixtures for any league within specified days."""
-        return self.get_league_fixtures(league_id, status='NS')  # Not Started
+        # Get ALL fixtures for current season from API (real-time data)
+        # Then filter for upcoming statuses on backend to catch all variations
+        current_season = datetime.now().year
+        all_fixtures_response = self.get_league_fixtures(league_id, current_season)
+        
+        if 'response' not in all_fixtures_response:
+            return all_fixtures_response
+        
+        all_fixtures = all_fixtures_response['response']
+        
+        # Filter for upcoming fixture statuses (real-time API data)
+        upcoming_statuses = {'NS', 'Not Started', 'PST', 'TBD', 'SUSP', 'INT'}
+        upcoming_fixtures = []
+        
+        for fixture in all_fixtures:
+            fixture_status = fixture.get('fixture', {}).get('status', {}).get('short', '')
+            if fixture_status in upcoming_statuses:
+                upcoming_fixtures.append(fixture)
+        
+        # Return filtered results in same format as original API response
+        return {
+            'response': upcoming_fixtures,
+            'results': len(upcoming_fixtures)
+        }
     
     def get_completed_fixtures_by_league(self, league_id: int, season: int = None) -> Dict:
         """Get completed fixtures for any league."""
