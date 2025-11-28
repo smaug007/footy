@@ -293,11 +293,67 @@ class DataImporter:
                     logger.error(f"Error importing statistics for match {match['api_fixture_id']}: {e}")
                     continue
             
-            self.imported_counts['statistics'] = imported_count
-            logger.info(f"Imported corner statistics for {imported_count} matches in {league_config.name} season {season}")
+            return imported_count
+                    
+        except Exception as e:
+            logger.error(f"Error importing match statistics for league {league_id}: {e}")
+            return 0
+    
+    def import_match_cards(self, league_id: int, season: int, limit: int = None) -> int:
+        """Import match cards statistics for completed matches in specific league."""
+        try:
+            # Get league config
+            from data.league_manager import get_league_manager
+            league_manager = get_league_manager()
+            league_config = league_manager.get_league_by_id(league_id)
+            
+            if not league_config:
+                logger.error(f"League {league_id} not found")
+                return 0
+            
+            # Get completed matches from database that don't have cards data yet
+            completed_matches = self.db_manager.get_matches_needing_cards_stats(league_id, season, limit)
+            
+            if not completed_matches:
+                logger.info(f"No completed matches needing cards for {league_config.name} season {season}")
+                return 0
+            
+            imported_count = 0
+            
+            for match in completed_matches:
+                try:
+                    # Use the cards-specific API method
+                    cards_data = self.api_client.get_fixture_cards_statistics(match['api_fixture_id'])
+                    
+                    if not cards_data:
+                        logger.debug(f"No cards statistics found for match {match['api_fixture_id']} in {league_config.name}")
+                        continue
+                    
+                    # Update match with cards data
+                    success = self.db_manager.update_match_cards(
+                        match['id'],
+                        cards_data['home_yellow_cards'],
+                        cards_data['away_yellow_cards'],
+                        cards_data['home_red_cards'],
+                        cards_data['away_red_cards']
+                    )
+                    
+                    if success:
+                        imported_count += 1
+                        logger.debug(f"Updated {league_config.name} match {match['api_fixture_id']} with cards: Y{cards_data['home_yellow_cards']}-{cards_data['away_yellow_cards']} R{cards_data['home_red_cards']}-{cards_data['away_red_cards']}")
+                    else:
+                        logger.warning(f"Failed to update match {match['api_fixture_id']} with cards data")
+                
+                except Exception as e:
+                    logger.error(f"Error importing cards for match {match['api_fixture_id']}: {e}")
+                    continue
+            
+            logger.info(f"Imported cards statistics for {imported_count} matches in {league_config.name} season {season}")
             return imported_count
             
         except Exception as e:
+            logger.error(f"Error importing cards statistics for league {league_id}: {e}")
+            return 0
             logger.error(f"Error importing match statistics for {league_config.name if league_config else league_id} season {season}: {e}")
             raise
     

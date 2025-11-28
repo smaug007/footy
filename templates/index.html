@@ -996,6 +996,57 @@ function createInlinePredictionDisplay(prediction, fixture, season) {
                 </div>
                 `}
                 
+                <!-- Cards Predictions -->
+                ${prediction.cards_predictions ? `
+                <div class="col-md-3">
+                    <div class="cards-predictions">
+                        <!-- Total Cards -->
+                        <div class="cards-total mb-1">
+                            <span class="line-label">Cards:</span>
+                            <span class="badge bg-info">
+                                ${prediction.cards_predictions.match_cards.total_cards.toFixed(1)}
+                            </span>
+                        </div>
+                        
+                        <!-- Cards Lines (Over 1.5, 2.5, 3.5) -->
+                        <div class="cards-lines">
+                            <div class="cards-line-row mb-1">
+                                <small class="text-muted fw-bold me-1">O1.5</small>
+                                <span class="badge bg-${getCardsBadgeColor(prediction.cards_predictions.match_cards.over_1_5)} small">
+                                    ${prediction.cards_predictions.match_cards.over_1_5.toFixed(0)}%
+                                </span>
+                            </div>
+                            <div class="cards-line-row mb-1">
+                                <small class="text-muted fw-bold me-1">O2.5</small>
+                                <span class="badge bg-${getCardsBadgeColor(prediction.cards_predictions.match_cards.over_2_5)} small">
+                                    ${prediction.cards_predictions.match_cards.over_2_5.toFixed(0)}%
+                                </span>
+                            </div>
+                            <div class="cards-line-row">
+                                <small class="text-muted fw-bold me-1">O3.5</small>
+                                <span class="badge bg-${getCardsBadgeColor(prediction.cards_predictions.match_cards.over_3_5)} small">
+                                    ${prediction.cards_predictions.match_cards.over_3_5.toFixed(0)}%
+                                </span>
+                            </div>
+                        </div>
+                        
+                        <!-- Team Cards Breakdown -->
+                        <div class="team-cards-breakdown mt-2 small">
+                            <span class="home-cards">🏠 ${prediction.cards_predictions.match_cards.home_cards.toFixed(1)}</span>
+                            <span class="away-cards ms-2">✈️ ${prediction.cards_predictions.match_cards.away_cards.toFixed(1)}</span>
+                        </div>
+                    </div>
+                </div>
+                ` : `
+                <div class="col-md-3">
+                    <div class="cards-predictions">
+                        <div class="text-muted small">
+                            <i class="fas fa-info-circle"></i> Cards predictions unavailable
+                        </div>
+                    </div>
+                </div>
+                `}
+                
                 <!-- Actions -->
                 <div class="col-md-4">
                     <div class="prediction-actions">
@@ -1088,6 +1139,12 @@ function getBttsRecommendationColor(probability, confidenceScore) {
     if (rec === 'BET') return 'success';
     if (rec === 'AVOID') return 'danger';
     return 'warning';
+}
+
+function getCardsBadgeColor(probability) {
+    if (probability >= 65) return 'success';
+    if (probability >= 45) return 'warning';
+    return 'secondary';
 }
 
 // Create prediction results area if it doesn't exist
@@ -1192,6 +1249,87 @@ function displayFixturePredictionResults(prediction, homeTeamName, awayTeamName,
                                     <div>
                                         <strong>✈️ ${awayTeamName}:</strong><br>
                                         <span class="text-muted">${prediction.goal_predictions.away_team_to_score.reasoning}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                ` : ''}
+                
+                <!-- Cards Predictions -->
+                ${prediction.cards_predictions ? `
+                <div class="row text-center mb-4">
+                    <div class="col-12">
+                        <h6 class="text-secondary mb-3"><i class="fas fa-id-card"></i> Cards Predictions</h6>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="p-3 bg-light rounded">
+                            <h4 class="text-primary mb-0">${prediction.cards_predictions.match_cards.total_cards.toFixed(1)}</h4>
+                            <small class="text-muted">Total Cards</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="p-3 bg-light rounded">
+                            <h4 class="text-info mb-0">${prediction.cards_predictions.match_cards.over_1_5.toFixed(0)}%</h4>
+                            <small class="text-muted">Over 1.5 Cards</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="p-3 bg-light rounded">
+                            <h4 class="text-warning mb-0">${prediction.cards_predictions.match_cards.over_2_5.toFixed(0)}%</h4>
+                            <small class="text-muted">Over 2.5 Cards</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="p-3 bg-light rounded">
+                            <h4 class="text-danger mb-0">${prediction.cards_predictions.match_cards.over_3_5.toFixed(0)}%</h4>
+                            <small class="text-muted">Over 3.5 Cards</small>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Cards Analysis -->
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <div class="card h-100">
+                            <div class="card-body text-center">
+                                <h6><i class="fas fa-id-card"></i> Cards Breakdown</h6>
+                                <div class="d-flex justify-content-around mt-3">
+                                    <div>
+                                        <h5 class="text-success mb-0">${prediction.cards_predictions.match_cards.home_cards.toFixed(1)}</h5>
+                                        <small class="text-muted">🏠 ${homeTeamName}</small>
+                                    </div>
+                                    <div>
+                                        <h5 class="text-warning mb-0">${prediction.cards_predictions.match_cards.away_cards.toFixed(1)}</h5>
+                                        <small class="text-muted">✈️ ${awayTeamName}</small>
+                                    </div>
+                                </div>
+                                <p class="mt-3 mb-0 small text-muted">
+                                    ${prediction.cards_predictions.match_cards.confidence === 'High' || prediction.cards_predictions.match_cards.confidence === 'Very High' ? '✅ High confidence' : 
+                                      prediction.cards_predictions.match_cards.confidence === 'Medium' ? '⚡ Moderate confidence' : '⚠️ Low confidence'}
+                                    • ${prediction.cards_predictions.match_cards.data_quality || 'Standard'} data
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card h-100">
+                            <div class="card-body">
+                                <h6><i class="fas fa-clipboard-list"></i> Cards Analysis</h6>
+                                <div class="small text-muted">
+                                    ${prediction.cards_predictions.match_cards.reasoning}
+                                </div>
+                                <div class="mt-3 small">
+                                    <div class="mb-1">
+                                        <strong>Home Team Stats:</strong>
+                                        ${prediction.cards_predictions.match_cards.home_team_stats.avg_cards.toFixed(1)} cards/game
+                                        (${prediction.cards_predictions.match_cards.home_team_stats.total_games} games)
+                                    </div>
+                                    <div>
+                                        <strong>Away Team Stats:</strong>
+                                        ${prediction.cards_predictions.match_cards.away_team_stats.avg_cards.toFixed(1)} cards/game
+                                        (${prediction.cards_predictions.match_cards.away_team_stats.total_games} games)
                                     </div>
                                 </div>
                             </div>

@@ -373,6 +373,72 @@ class APIFootballClient:
             logger.error(f"Error getting corner statistics for fixture {fixture_id}: {e}")
             return None
     
+    def get_fixture_cards_statistics(self, fixture_id: int) -> Dict:
+        """Get cards statistics specifically for a fixture."""
+        try:
+            # Get full fixture statistics
+            stats_response = self.get_fixture_statistics(fixture_id)
+            
+            if not stats_response or 'response' not in stats_response:
+                return None
+            
+            # Extract cards data from statistics
+            cards_data = {
+                'fixture_id': fixture_id,
+                'home_yellow_cards': 0,
+                'home_red_cards': 0,
+                'away_yellow_cards': 0,
+                'away_red_cards': 0,
+                'total_cards': 0
+            }
+            
+            # Parse statistics response
+            response_data = stats_response.get('response', [])
+            
+            # API-Football returns two objects in response array: [home_team_stats, away_team_stats]
+            if len(response_data) == 2:
+                # Process home team (index 0)
+                home_stats = response_data[0].get('statistics', [])
+                for stat in home_stats:
+                    if stat.get('type') == 'Yellow Cards':
+                        try:
+                            cards_data['home_yellow_cards'] = int(stat.get('value', 0) or 0)
+                        except (ValueError, TypeError):
+                            cards_data['home_yellow_cards'] = 0
+                    elif stat.get('type') == 'Red Cards':
+                        try:
+                            cards_data['home_red_cards'] = int(stat.get('value', 0) or 0)
+                        except (ValueError, TypeError):
+                            cards_data['home_red_cards'] = 0
+                
+                # Process away team (index 1)
+                away_stats = response_data[1].get('statistics', [])
+                for stat in away_stats:
+                    if stat.get('type') == 'Yellow Cards':
+                        try:
+                            cards_data['away_yellow_cards'] = int(stat.get('value', 0) or 0)
+                        except (ValueError, TypeError):
+                            cards_data['away_yellow_cards'] = 0
+                    elif stat.get('type') == 'Red Cards':
+                        try:
+                            cards_data['away_red_cards'] = int(stat.get('value', 0) or 0)
+                        except (ValueError, TypeError):
+                            cards_data['away_red_cards'] = 0
+            
+            # Calculate total cards (yellow + red for both teams)
+            cards_data['total_cards'] = (
+                cards_data['home_yellow_cards'] + 
+                cards_data['home_red_cards'] +
+                cards_data['away_yellow_cards'] + 
+                cards_data['away_red_cards']
+            )
+            
+            return cards_data
+            
+        except Exception as e:
+            logger.error(f"Error getting cards statistics for fixture {fixture_id}: {e}")
+            return None
+    
     def get_teams(self, league_id: int, season: int) -> Dict:
         """Get teams for a league and season."""
         params = {
@@ -412,7 +478,30 @@ class APIFootballClient:
     
     def get_upcoming_fixtures_by_league(self, league_id: int, days_ahead: int = 7) -> Dict:
         """Get upcoming fixtures for any league within specified days."""
-        return self.get_league_fixtures(league_id, status='NS')  # Not Started
+        # Get ALL fixtures for current season from API (real-time data)
+        # Then filter for upcoming statuses on backend to catch all variations
+        current_season = datetime.now().year
+        all_fixtures_response = self.get_league_fixtures(league_id, current_season)
+        
+        if 'response' not in all_fixtures_response:
+            return all_fixtures_response
+        
+        all_fixtures = all_fixtures_response['response']
+        
+        # Filter for upcoming fixture statuses (real-time API data)
+        upcoming_statuses = {'NS', 'Not Started', 'PST', 'TBD', 'SUSP', 'INT'}
+        upcoming_fixtures = []
+        
+        for fixture in all_fixtures:
+            fixture_status = fixture.get('fixture', {}).get('status', {}).get('short', '')
+            if fixture_status in upcoming_statuses:
+                upcoming_fixtures.append(fixture)
+        
+        # Return filtered results in same format as original API response
+        return {
+            'response': upcoming_fixtures,
+            'results': len(upcoming_fixtures)
+        }
     
     def get_completed_fixtures_by_league(self, league_id: int, season: int = None) -> Dict:
         """Get completed fixtures for any league."""

@@ -114,7 +114,7 @@ def register_routes(app):
             if not season:
                 season = league_manager.get_current_season(league_id)
             
-            # Get upcoming fixtures for specific league
+            # Get upcoming fixtures from external API (real-time data)
             fixtures_response = client.get_upcoming_fixtures_by_league(league_config.api_league_id)
             fixtures = fixtures_response.get('response', [])
             
@@ -129,18 +129,32 @@ def register_routes(app):
             from datetime import datetime, timedelta, timezone
             now = datetime.now(timezone.utc)  # Make timezone-aware
             
+            # Set proper start/end boundaries for each filter type
             if filter_type == 'today':
-                end_date = now + timedelta(days=1)
+                # Today: from start of today to end of today
+                start_of_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                end_date = start_of_today + timedelta(days=1)
+                now = start_of_today
             elif filter_type == 'tomorrow':
-                start_date = now + timedelta(days=1)
-                end_date = now + timedelta(days=2)
-                now = start_date
+                # Tomorrow: from start of tomorrow to end of tomorrow
+                start_of_tomorrow = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+                end_date = start_of_tomorrow + timedelta(days=1)
+                now = start_of_tomorrow
             elif filter_type == '3days':
-                end_date = now + timedelta(days=3)
+                # Next 3 days: from start of today to end of day 3
+                start_of_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                end_date = start_of_today + timedelta(days=3)
+                now = start_of_today
             elif filter_type == 'week':
-                end_date = now + timedelta(days=7)
+                # Next week: from start of today to end of day 7
+                start_of_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                end_date = start_of_today + timedelta(days=7)
+                now = start_of_today
             else:  # 2weeks default
-                end_date = now + timedelta(days=14)
+                # Next 2 weeks: from start of today to end of day 14 (fix for consistency)
+                start_of_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                end_date = start_of_today + timedelta(days=14)
+                now = start_of_today
             
             filtered_fixtures = []
             for fixture in fixtures:
@@ -564,6 +578,59 @@ def register_routes(app):
             return jsonify({
                 'status': 'error',
                 'message': f'BTTS 2+ goals prediction failed: {str(e)}',
+                'data': {}
+            }), 500
+
+    @app.route('/api/cards', methods=['POST'])
+    def api_cards():
+        """Generate cards prediction for a match."""
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'No JSON data provided',
+                    'data': {}
+                }), 400
+            
+            home_team_id = data.get('home_team_id')
+            away_team_id = data.get('away_team_id')
+            season = data.get('season', 2025)
+            
+            if not home_team_id or not away_team_id:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'home_team_id and away_team_id are required',
+                    'data': {}
+                }), 400
+                
+            logger.info(f"Generating cards prediction: {home_team_id} vs {away_team_id} (season {season})")
+            
+            # Use CardsAnalyzer to generate prediction
+            from data.cards_analyzer import CardsAnalyzer
+            db_manager = get_db_manager()
+            cards_analyzer = CardsAnalyzer(db_manager)
+            
+            cards_prediction = cards_analyzer.predict_match_cards(home_team_id, away_team_id, season)
+            
+            if not cards_prediction:
+                return jsonify({
+                    'status': 'error',
+                    'message': 'Could not generate cards prediction',
+                    'data': {}
+                }), 404
+            
+            return jsonify({
+                'status': 'success',
+                'message': 'Cards prediction generated successfully',
+                'data': cards_prediction
+            })
+            
+        except Exception as e:
+            logger.error(f"Cards prediction error: {e}")
+            return jsonify({
+                'status': 'error',
+                'message': f'Cards prediction failed: {str(e)}',
                 'data': {}
             }), 500
 
@@ -1097,7 +1164,7 @@ def calculate_live_corner_confidence(home_team_id, away_team_id, prediction_date
             logger.info(f'🎯 predict_match_corners returned: {prediction_result is not None}')
             
             if prediction_result:
-                logger.info(f'📊 Raw prediction: O5.5={prediction_result.confidence_5_5:.1f}%, O6.5={prediction_result.confidence_6_5:.1f}%, Total={prediction_result.predicted_total_corners:.1f}')
+                logger.info(f'📊 Raw prediction: O5.5={prediction_result.over_5_5_confidence:.1f}%, O6.5={prediction_result.over_6_5_confidence:.1f}%, Total={prediction_result.predicted_total_corners:.1f}')
         except Exception as e:
             logger.error(f'❌ Error in predict_match_corners: {e}')
             import traceback
@@ -1123,15 +1190,15 @@ def calculate_live_corner_confidence(home_team_id, away_team_id, prediction_date
             logger.info(f'🔄 Applying H2H confidence boost: {confidence_boost}')
             
             # Apply H2H adjustments to confidence scores
-            prediction_result.confidence_5_5 += confidence_boost
-            prediction_result.confidence_6_5 += confidence_boost
-            prediction_result.confidence_7_5 += confidence_boost
+            prediction_result.over_5_5_confidence += confidence_boost
+            prediction_result.over_6_5_confidence += confidence_boost
+            prediction_result.over_7_5_confidence += confidence_boost
         else:
             logger.info('ℹ️  No H2H adjustments applied (insufficient data)')
         
         result = {
-            'confidence_5_5': prediction_result.confidence_5_5,
-            'confidence_6_5': prediction_result.confidence_6_5,
+            'confidence_5_5': prediction_result.over_5_5_confidence,
+            'confidence_6_5': prediction_result.over_6_5_confidence,
             'predicted_total': prediction_result.predicted_total_corners,
             'predicted_home': prediction_result.predicted_home_corners,
             'predicted_away': prediction_result.predicted_away_corners
@@ -1328,10 +1395,10 @@ def generate_detailed_analysis(home_team_id, away_team_id, season, db_manager):
                     ('over_5_5', type('LineData', (), {
                         'line_value': 5.5,
                         'calculated_confidence': prediction.over_5_5_confidence,
-                        'base_confidence': prediction.calculation_details['over_5.5']['base_confidence'] if prediction.calculation_details else prediction.over_5_5_confidence * 0.9,
-                        'sample_penalty': prediction.calculation_details['over_5.5']['sample_penalty'] if prediction.calculation_details else 1.0,
+                        'base_confidence': getattr(prediction, 'calculation_details', {}).get('over_5.5', {}).get('base_confidence', prediction.over_5_5_confidence * 0.9),
+                        'sample_penalty': getattr(prediction, 'calculation_details', {}).get('over_5.5', {}).get('sample_penalty', 1.0),
                         'sample_description': 'Based on real historical data analysis',
-                        'consistency_factor': prediction.calculation_details['over_5.5']['consistency_factor'] if prediction.calculation_details else 1.05,
+                        'consistency_factor': getattr(prediction, 'calculation_details', {}).get('over_5.5', {}).get('consistency_factor', 1.05),
                         'consistency_details': type('ConsistencyDetails', (), {
                             'overall_consistency': prediction.statistical_confidence,
                             'has_small_sample_penalty': False,
@@ -1351,18 +1418,18 @@ def generate_detailed_analysis(home_team_id, away_team_id, season, db_manager):
                         'home_team': type('TeamData', (), {
                             'venue_weighting_applied': True,
                             'fallback_used': False,
-                            'relevant_venue_games': prediction.calculation_details['over_5.5']['home_games'] if prediction.calculation_details else 10,
-                            'rate': prediction.calculation_details['over_5.5']['home_line_rate'] if prediction.calculation_details else prediction.over_5_5_confidence * 0.52,
-                            'percentage_display': f'{prediction.calculation_details["over_5.5"]["home_line_rate"] if prediction.calculation_details else prediction.over_5_5_confidence * 0.52:.1f}%',
+                            'relevant_venue_games': getattr(prediction, 'calculation_details', {}).get('over_5.5', {}).get('home_games', 10),
+                            'rate': getattr(prediction, 'calculation_details', {}).get('over_5.5', {}).get('home_line_rate', prediction.over_5_5_confidence * 0.52),
+                            'percentage_display': f'{getattr(prediction, "calculation_details", {}).get("over_5.5", {}).get("home_line_rate", prediction.over_5_5_confidence * 0.52):.1f}%',
                             'venue_weighting_error': '',
                             'recent_totals': [11, 9, 12, 8, 10]
                         })(),
                         'away_team': type('TeamData', (), {
                             'venue_weighting_applied': True,
                             'fallback_used': False,
-                            'relevant_venue_games': prediction.calculation_details['over_5.5']['away_games'] if prediction.calculation_details else 10,
-                            'rate': prediction.calculation_details['over_5.5']['away_line_rate'] if prediction.calculation_details else prediction.over_5_5_confidence * 0.48,
-                            'percentage_display': f'{prediction.calculation_details["over_5.5"]["away_line_rate"] if prediction.calculation_details else prediction.over_5_5_confidence * 0.48:.1f}%',
+                            'relevant_venue_games': getattr(prediction, 'calculation_details', {}).get('over_5.5', {}).get('away_games', 10),
+                            'rate': getattr(prediction, 'calculation_details', {}).get('over_5.5', {}).get('away_line_rate', prediction.over_5_5_confidence * 0.48),
+                            'percentage_display': f'{getattr(prediction, "calculation_details", {}).get("over_5.5", {}).get("away_line_rate", prediction.over_5_5_confidence * 0.48):.1f}%',
                             'venue_weighting_error': '',
                             'recent_totals': [10, 7, 11, 9, 8]
                         })()
@@ -1370,10 +1437,10 @@ def generate_detailed_analysis(home_team_id, away_team_id, season, db_manager):
                     ('over_6_5', type('LineData', (), {
                         'line_value': 6.5,
                         'calculated_confidence': prediction.over_6_5_confidence,
-                        'base_confidence': prediction.calculation_details['over_6.5']['base_confidence'] if prediction.calculation_details else prediction.over_6_5_confidence * 0.9,
-                        'sample_penalty': prediction.calculation_details['over_6.5']['sample_penalty'] if prediction.calculation_details else 1.0,
+                        'base_confidence': getattr(prediction, 'calculation_details', {}).get('over_6.5', {}).get('base_confidence', prediction.over_6_5_confidence * 0.9),
+                        'sample_penalty': getattr(prediction, 'calculation_details', {}).get('over_6.5', {}).get('sample_penalty', 1.0),
                         'sample_description': 'Based on real historical data analysis',
-                        'consistency_factor': prediction.calculation_details['over_6.5']['consistency_factor'] if prediction.calculation_details else 1.03,
+                        'consistency_factor': getattr(prediction, 'calculation_details', {}).get('over_6.5', {}).get('consistency_factor', 1.03),
                         'consistency_details': type('ConsistencyDetails', (), {
                             'overall_consistency': prediction.statistical_confidence,
                             'has_small_sample_penalty': False,
@@ -1393,18 +1460,18 @@ def generate_detailed_analysis(home_team_id, away_team_id, season, db_manager):
                         'home_team': type('TeamData', (), {
                             'venue_weighting_applied': True,
                             'fallback_used': False,
-                            'relevant_venue_games': prediction.calculation_details['over_6.5']['home_games'] if prediction.calculation_details else 10,
-                            'rate': prediction.calculation_details['over_6.5']['home_line_rate'] if prediction.calculation_details else prediction.over_6_5_confidence * 0.52,
-                            'percentage_display': f'{prediction.calculation_details["over_6.5"]["home_line_rate"] if prediction.calculation_details else prediction.over_6_5_confidence * 0.52:.1f}%',
+                            'relevant_venue_games': getattr(prediction, 'calculation_details', {}).get('over_6.5', {}).get('home_games', 10),
+                            'rate': getattr(prediction, 'calculation_details', {}).get('over_6.5', {}).get('home_line_rate', prediction.over_6_5_confidence * 0.52),
+                            'percentage_display': f'{getattr(prediction, "calculation_details", {}).get("over_6.5", {}).get("home_line_rate", prediction.over_6_5_confidence * 0.52):.1f}%',
                             'venue_weighting_error': '',
                             'recent_totals': [11, 9, 12, 8, 10]
                         })(),
                         'away_team': type('TeamData', (), {
                             'venue_weighting_applied': True,
                             'fallback_used': False,
-                            'relevant_venue_games': prediction.calculation_details['over_6.5']['away_games'] if prediction.calculation_details else 10,
-                            'rate': prediction.calculation_details['over_6.5']['away_line_rate'] if prediction.calculation_details else prediction.over_6_5_confidence * 0.48,
-                            'percentage_display': f'{prediction.calculation_details["over_6.5"]["away_line_rate"] if prediction.calculation_details else prediction.over_6_5_confidence * 0.48:.1f}%',
+                            'relevant_venue_games': getattr(prediction, 'calculation_details', {}).get('over_6.5', {}).get('away_games', 10),
+                            'rate': getattr(prediction, 'calculation_details', {}).get('over_6.5', {}).get('away_line_rate', prediction.over_6_5_confidence * 0.48),
+                            'percentage_display': f'{getattr(prediction, "calculation_details", {}).get("over_6.5", {}).get("away_line_rate", prediction.over_6_5_confidence * 0.48):.1f}%',
                             'venue_weighting_error': '',
                             'recent_totals': [10, 7, 11, 9, 8]
                         })()
@@ -1426,17 +1493,17 @@ def generate_detailed_analysis(home_team_id, away_team_id, season, db_manager):
             
             # Nested line_predictions structure
             'line_predictions': type('LinePredictions', (), {
-                'over_5_5_confidence': prediction.confidence_5_5,
-                'over_6_5_confidence': prediction.confidence_6_5,
-                'over_7_5_confidence': prediction.confidence_7_5,
+                'over_5_5_confidence': prediction.over_5_5_confidence,
+                'over_6_5_confidence': prediction.over_6_5_confidence,
+                'over_7_5_confidence': prediction.over_7_5_confidence,
                 'over_5_5': type('LinePrediction', (), {
-                    'recommendation': 'BET' if prediction.confidence_5_5 >= 65 else 'AVOID' if prediction.confidence_5_5 < 45 else 'NEUTRAL'
+                    'recommendation': 'BET' if prediction.over_5_5_confidence >= 65 else 'AVOID' if prediction.over_5_5_confidence < 45 else 'NEUTRAL'
                 })(),
                 'over_6_5': type('LinePrediction', (), {
-                    'recommendation': 'BET' if prediction.confidence_6_5 >= 65 else 'AVOID' if prediction.confidence_6_5 < 45 else 'NEUTRAL'
+                    'recommendation': 'BET' if prediction.over_6_5_confidence >= 65 else 'AVOID' if prediction.over_6_5_confidence < 45 else 'NEUTRAL'
                 })(),
                 'over_7_5': type('LinePrediction', (), {
-                    'recommendation': 'BET' if prediction.confidence_7_5 >= 65 else 'AVOID' if prediction.confidence_7_5 < 45 else 'NEUTRAL'
+                    'recommendation': 'BET' if prediction.over_7_5_confidence >= 65 else 'AVOID' if prediction.over_7_5_confidence < 45 else 'NEUTRAL'
                 })()
             })(),
             
@@ -1460,8 +1527,8 @@ def generate_detailed_analysis(home_team_id, away_team_id, season, db_manager):
             # Web display structure
             'web_display': type('WebDisplay', (), {
                 'reliability_badge': 'success' if prediction.statistical_confidence >= 70 else 'warning' if prediction.statistical_confidence >= 50 else 'danger',
-                'confidence_color_5_5': 'success' if prediction.confidence_5_5 >= 70 else 'warning' if prediction.confidence_5_5 >= 50 else 'danger',
-                'confidence_color_6_5': 'success' if prediction.confidence_6_5 >= 70 else 'warning' if prediction.confidence_6_5 >= 50 else 'danger'
+                'confidence_color_5_5': 'success' if prediction.over_5_5_confidence >= 70 else 'warning' if prediction.over_5_5_confidence >= 50 else 'danger',
+                'confidence_color_6_5': 'success' if prediction.over_6_5_confidence >= 70 else 'warning' if prediction.over_6_5_confidence >= 50 else 'danger'
             })(),
             
             # Match info structure
@@ -1739,17 +1806,17 @@ def generate_time_travel_corner_analysis(home_team_id, away_team_id, season, db_
             
             # Nested line_predictions structure
             'line_predictions': type('LinePredictions', (), {
-                'over_5_5_confidence': prediction_result.confidence_5_5,
-                'over_6_5_confidence': prediction_result.confidence_6_5,
-                'over_7_5_confidence': prediction_result.confidence_7_5,
+                'over_5_5_confidence': prediction_result.over_5_5_confidence,
+                'over_6_5_confidence': prediction_result.over_6_5_confidence,
+                'over_7_5_confidence': prediction_result.over_7_5_confidence,
                 'over_5_5': type('LinePrediction', (), {
-                    'recommendation': 'BET' if prediction_result.confidence_5_5 >= 65 else 'AVOID' if prediction_result.confidence_5_5 < 45 else 'NEUTRAL'
+                    'recommendation': 'BET' if prediction_result.over_5_5_confidence >= 65 else 'AVOID' if prediction_result.over_5_5_confidence < 45 else 'NEUTRAL'
                 })(),
                 'over_6_5': type('LinePrediction', (), {
-                    'recommendation': 'BET' if prediction_result.confidence_6_5 >= 65 else 'AVOID' if prediction_result.confidence_6_5 < 45 else 'NEUTRAL'
+                    'recommendation': 'BET' if prediction_result.over_6_5_confidence >= 65 else 'AVOID' if prediction_result.over_6_5_confidence < 45 else 'NEUTRAL'
                 })(),
                 'over_7_5': type('LinePrediction', (), {
-                    'recommendation': 'BET' if prediction_result.confidence_7_5 >= 65 else 'AVOID' if prediction_result.confidence_7_5 < 45 else 'NEUTRAL'
+                    'recommendation': 'BET' if prediction_result.over_7_5_confidence >= 65 else 'AVOID' if prediction_result.over_7_5_confidence < 45 else 'NEUTRAL'
                 })()
             })(),
             
@@ -1773,8 +1840,8 @@ def generate_time_travel_corner_analysis(home_team_id, away_team_id, season, db_
             # Web display structure
             'web_display': type('WebDisplay', (), {
                 'reliability_badge': 'success' if prediction_result.statistical_confidence >= 70 else 'warning' if prediction_result.statistical_confidence >= 50 else 'danger',
-                'confidence_color_5_5': 'success' if prediction_result.confidence_5_5 >= 70 else 'warning' if prediction_result.confidence_5_5 >= 50 else 'danger',
-                'confidence_color_6_5': 'success' if prediction_result.confidence_6_5 >= 70 else 'warning' if prediction_result.confidence_6_5 >= 50 else 'danger'
+                'confidence_color_5_5': 'success' if prediction_result.over_5_5_confidence >= 70 else 'warning' if prediction_result.over_5_5_confidence >= 50 else 'danger',
+                'confidence_color_6_5': 'success' if prediction_result.over_6_5_confidence >= 70 else 'warning' if prediction_result.over_6_5_confidence >= 50 else 'danger'
             })(),
             
             # Match info structure
@@ -1790,42 +1857,42 @@ def generate_time_travel_corner_analysis(home_team_id, away_team_id, season, db_
             'calculation_breakdown': {
                 'confidence_calculations': {
                     'over_5_5': {
-                        'calculated_confidence': prediction_result.confidence_5_5,
-                        'base_confidence_before_h2h': prediction_result.confidence_5_5 - 1.5,  # Historical H2H adjustment
+                        'calculated_confidence': prediction_result.over_5_5_confidence,
+                        'base_confidence_before_h2h': prediction_result.over_5_5_confidence - 1.5,  # Historical H2H adjustment
                         'h2h_adjustment': 1.5,  # Time-travel H2H adjustment
                         'h2h_reliability': 'Historical',  # Time-travel reliability
                         'consistency_details': {
                             'overall_consistency': prediction_result.statistical_confidence,
-                            'home_rate': prediction_result.confidence_5_5 * 0.52,
-                            'away_rate': prediction_result.confidence_5_5 * 0.48
+                            'home_rate': prediction_result.over_5_5_confidence * 0.52,
+                            'away_rate': prediction_result.over_5_5_confidence * 0.48
                         }
                     },
                     'over_6_5': {
-                        'calculated_confidence': prediction_result.confidence_6_5,
-                        'base_confidence_before_h2h': prediction_result.confidence_6_5 - 1.0,  # Historical H2H adjustment
+                        'calculated_confidence': prediction_result.over_6_5_confidence,
+                        'base_confidence_before_h2h': prediction_result.over_6_5_confidence - 1.0,  # Historical H2H adjustment
                         'h2h_adjustment': 1.0,  # Time-travel H2H adjustment
                         'h2h_reliability': 'Historical',  # Time-travel reliability
                         'consistency_details': {
                             'overall_consistency': prediction_result.statistical_confidence,
-                            'home_rate': prediction_result.confidence_6_5 * 0.52,
-                            'away_rate': prediction_result.confidence_6_5 * 0.48
+                            'home_rate': prediction_result.over_6_5_confidence * 0.52,
+                            'away_rate': prediction_result.over_6_5_confidence * 0.48
                         }
                     },
                     'items': lambda: [
                         ('over_5_5', type('LineData', (), {
                             'line_value': 5.5,
-                            'calculated_confidence': prediction_result.confidence_5_5,
-                            'base_confidence': prediction_result.calculation_details['over_5.5']['base_confidence'] if prediction_result.calculation_details else prediction_result.confidence_5_5 * 0.9,
-                            'sample_penalty': prediction_result.calculation_details['over_5.5']['sample_penalty'] if prediction_result.calculation_details else 1.0,
+                            'calculated_confidence': prediction_result.over_5_5_confidence,
+                            'base_confidence': getattr(prediction_result, 'calculation_details', {}).get('over_5.5', {}).get('base_confidence', prediction_result.over_5_5_confidence * 0.9),
+                            'sample_penalty': getattr(prediction_result, 'calculation_details', {}).get('over_5.5', {}).get('sample_penalty', 1.0),
                             'sample_description': 'Time-travel analysis using historical data',
-                            'consistency_factor': prediction_result.calculation_details['over_5.5']['consistency_factor'] if prediction_result.calculation_details else 1.05,
+                            'consistency_factor': getattr(prediction_result, 'calculation_details', {}).get('over_5.5', {}).get('consistency_factor', 1.05),
                             'consistency_details': type('ConsistencyDetails', (), {
                                 'overall_consistency': prediction_result.statistical_confidence,
                                 'has_small_sample_penalty': False,
                                 'calculation_formula': 'Time-travel analysis: Team consistency × Match context reliability',
                                 'explanation': 'Historical analysis shows consistent corner performance patterns',
-                                'home_rate': prediction_result.confidence_5_5 * 0.52,
-                                'away_rate': prediction_result.confidence_5_5 * 0.48,
+                                'home_rate': prediction_result.over_5_5_confidence * 0.52,
+                                'away_rate': prediction_result.over_5_5_confidence * 0.48,
                                 'home_line_rate': 75.0,
                                 'home_line_count': 15,
                                 'home_predictability': 80.0,
@@ -1839,8 +1906,8 @@ def generate_time_travel_corner_analysis(home_team_id, away_team_id, season, db_
                                 'venue_weighting_applied': True,
                                 'fallback_used': False,
                                 'relevant_venue_games': 10,
-                                'rate': prediction_result.calculation_details['over_5.5']['home_line_rate'] if prediction_result.calculation_details else prediction_result.confidence_5_5 * 0.52,
-                                'percentage_display': f'{prediction_result.calculation_details["over_5.5"]["home_line_rate"] if prediction_result.calculation_details else prediction_result.confidence_5_5 * 0.52:.1f}%',
+                                'rate': getattr(prediction_result, 'calculation_details', {}).get('over_5.5', {}).get('home_line_rate', prediction_result.over_5_5_confidence * 0.52),
+                                'percentage_display': f'{getattr(prediction_result, "calculation_details", {}).get("over_5.5", {}).get("home_line_rate", prediction_result.over_5_5_confidence * 0.52):.1f}%',
                                 'venue_weighting_error': '',
                                 'recent_totals': [11, 9, 12, 8, 10]
                             })(),
@@ -1848,26 +1915,26 @@ def generate_time_travel_corner_analysis(home_team_id, away_team_id, season, db_
                                 'venue_weighting_applied': True,
                                 'fallback_used': False,
                                 'relevant_venue_games': 10,
-                                'rate': prediction_result.calculation_details['over_5.5']['away_line_rate'] if prediction_result.calculation_details else prediction_result.confidence_5_5 * 0.48,
-                                'percentage_display': f'{prediction_result.calculation_details["over_5.5"]["away_line_rate"] if prediction_result.calculation_details else prediction_result.confidence_5_5 * 0.48:.1f}%',
+                                'rate': getattr(prediction_result, 'calculation_details', {}).get('over_5.5', {}).get('away_line_rate', prediction_result.over_5_5_confidence * 0.48),
+                                'percentage_display': f'{getattr(prediction_result, "calculation_details", {}).get("over_5.5", {}).get("away_line_rate", prediction_result.over_5_5_confidence * 0.48):.1f}%',
                                 'venue_weighting_error': '',
                                 'recent_totals': [10, 7, 11, 9, 8]
                             })()
                         })()),
                         ('over_6_5', type('LineData', (), {
                             'line_value': 6.5,
-                            'calculated_confidence': prediction_result.confidence_6_5,
-                            'base_confidence': prediction_result.calculation_details['over_6.5']['base_confidence'] if prediction_result.calculation_details else prediction_result.confidence_6_5 * 0.9,
-                            'sample_penalty': prediction_result.calculation_details['over_6.5']['sample_penalty'] if prediction_result.calculation_details else 1.0,
+                            'calculated_confidence': prediction_result.over_6_5_confidence,
+                            'base_confidence': getattr(prediction_result, 'calculation_details', {}).get('over_6.5', {}).get('base_confidence', prediction_result.over_6_5_confidence * 0.9),
+                            'sample_penalty': getattr(prediction_result, 'calculation_details', {}).get('over_6.5', {}).get('sample_penalty', 1.0),
                             'sample_description': 'Time-travel analysis using historical data',
-                            'consistency_factor': prediction_result.calculation_details['over_6.5']['consistency_factor'] if prediction_result.calculation_details else 1.03,
+                            'consistency_factor': getattr(prediction_result, 'calculation_details', {}).get('over_6.5', {}).get('consistency_factor', 1.03),
                             'consistency_details': type('ConsistencyDetails', (), {
                                 'overall_consistency': prediction_result.statistical_confidence,
                                 'has_small_sample_penalty': False,
                                 'calculation_formula': 'Time-travel analysis: Team consistency × Match context reliability',
                                 'explanation': 'Historical analysis for higher corner lines',
-                                'home_rate': prediction_result.confidence_6_5 * 0.52,
-                                'away_rate': prediction_result.confidence_6_5 * 0.48,
+                                'home_rate': prediction_result.over_6_5_confidence * 0.52,
+                                'away_rate': prediction_result.over_6_5_confidence * 0.48,
                                 'home_line_rate': 65.0,
                                 'home_line_count': 13,
                                 'home_predictability': 75.0,
@@ -1881,8 +1948,8 @@ def generate_time_travel_corner_analysis(home_team_id, away_team_id, season, db_
                                 'venue_weighting_applied': True,
                                 'fallback_used': False,
                                 'relevant_venue_games': 10,
-                                'rate': prediction_result.calculation_details['over_6.5']['home_line_rate'] if prediction_result.calculation_details else prediction_result.confidence_6_5 * 0.52,
-                                'percentage_display': f'{prediction_result.calculation_details["over_6.5"]["home_line_rate"] if prediction_result.calculation_details else prediction_result.confidence_6_5 * 0.52:.1f}%',
+                                'rate': getattr(prediction_result, 'calculation_details', {}).get('over_6.5', {}).get('home_line_rate', prediction_result.over_6_5_confidence * 0.52),
+                                'percentage_display': f'{getattr(prediction_result, "calculation_details", {}).get("over_6.5", {}).get("home_line_rate", prediction_result.over_6_5_confidence * 0.52):.1f}%',
                                 'venue_weighting_error': '',
                                 'recent_totals': [11, 9, 12, 8, 10]
                             })(),
@@ -1890,8 +1957,8 @@ def generate_time_travel_corner_analysis(home_team_id, away_team_id, season, db_
                                 'venue_weighting_applied': True,
                                 'fallback_used': False,
                                 'relevant_venue_games': 10,
-                                'rate': prediction_result.calculation_details['over_6.5']['away_line_rate'] if prediction_result.calculation_details else prediction_result.confidence_6_5 * 0.48,
-                                'percentage_display': f'{prediction_result.calculation_details["over_6.5"]["away_line_rate"] if prediction_result.calculation_details else prediction_result.confidence_6_5 * 0.48:.1f}%',
+                                'rate': getattr(prediction_result, 'calculation_details', {}).get('over_6.5', {}).get('away_line_rate', prediction_result.over_6_5_confidence * 0.48),
+                                'percentage_display': f'{getattr(prediction_result, "calculation_details", {}).get("over_6.5", {}).get("away_line_rate", prediction_result.over_6_5_confidence * 0.48):.1f}%',
                                 'venue_weighting_error': '',
                                 'recent_totals': [10, 7, 11, 9, 8]
                             })()

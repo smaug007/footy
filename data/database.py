@@ -126,6 +126,32 @@ class DatabaseManager:
         except sqlite3.OperationalError:
             pass  # Column already exists
         
+        # Add cards columns to existing matches table if they don't exist
+        try:
+            conn.execute("ALTER TABLE matches ADD COLUMN yellow_cards_home INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        
+        try:
+            conn.execute("ALTER TABLE matches ADD COLUMN yellow_cards_away INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        
+        try:
+            conn.execute("ALTER TABLE matches ADD COLUMN red_cards_home INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        
+        try:
+            conn.execute("ALTER TABLE matches ADD COLUMN red_cards_away INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        
+        try:
+            conn.execute("ALTER TABLE matches ADD COLUMN total_cards INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        
         # Add unique constraint on predictions.match_id to prevent duplicates
         try:
             # First check if the constraint already exists
@@ -361,11 +387,14 @@ class DatabaseManager:
             "CREATE INDEX IF NOT EXISTS idx_accuracy_stats_team ON team_accuracy_stats (team_id, season)",
             "CREATE INDEX IF NOT EXISTS idx_accuracy_stats_league ON team_accuracy_stats (league_id, team_id, season)",
             "CREATE INDEX IF NOT EXISTS idx_accuracy_history_team ON team_accuracy_history (team_id, season)",
-            "CREATE INDEX IF NOT EXISTS idx_accuracy_history_league ON team_accuracy_history (league_id, team_id, season)"
         ]
         
         for index_sql in indexes:
-            conn.execute(index_sql)
+            try:
+                conn.execute(index_sql)
+            except sqlite3.OperationalError as e:
+                logger.warning(f"Could not create index (column may not exist): {e}")
+                continue
         
         conn.commit()
         logger.debug("Database schema created/updated successfully")
@@ -503,14 +532,17 @@ class DatabaseManager:
     
     def get_team_matches(self, team_id: int, league_id: int, season: int, limit: int = None) -> List[Dict]:
         """Get matches for a team in a specific league and season."""
+        status_condition = self._build_completed_status_condition(league_id, season)
+        
         with self.get_connection() as conn:
-            sql = """
+            sql = f"""
                 SELECT m.*, ht.name as home_team_name, at.name as away_team_name
                 FROM matches m
                 JOIN teams ht ON m.home_team_id = ht.id
                 JOIN teams at ON m.away_team_id = at.id
                 WHERE (m.home_team_id = ? OR m.away_team_id = ?) 
-                AND m.league_id = ? AND m.season = ? AND m.status = 'FT'
+                AND m.league_id = ? AND m.season = ? 
+                AND {status_condition}
                 ORDER BY m.match_date DESC
             """
             params = [team_id, team_id, league_id, season]
@@ -531,14 +563,17 @@ class DatabaseManager:
             from datetime import datetime
             cutoff_date = datetime.strptime(cutoff_date, '%Y-%m-%d').date()
         
+        status_condition = self._build_completed_status_condition(league_id, season)
+        
         with self.get_connection() as conn:
-            sql = """
+            sql = f"""
                 SELECT m.*, ht.name as home_team_name, at.name as away_team_name
                 FROM matches m
                 JOIN teams ht ON m.home_team_id = ht.id
                 JOIN teams at ON m.away_team_id = at.id
                 WHERE (m.home_team_id = ? OR m.away_team_id = ?) 
-                AND m.league_id = ? AND m.season = ? AND m.status = 'FT'
+                AND m.league_id = ? AND m.season = ? 
+                AND {status_condition}
                 AND date(m.match_date) < ?
                 ORDER BY m.match_date DESC
             """
@@ -556,13 +591,15 @@ class DatabaseManager:
     
     def get_completed_matches(self, league_id: int, season: int, limit: int = None) -> List[Dict]:
         """Get completed matches for a specific league and season (with corner data)."""
+        status_condition = self._build_completed_status_condition(league_id, season)
+        
         with self.get_connection() as conn:
-            sql = """
+            sql = f"""
                 SELECT m.*, ht.name as home_team_name, at.name as away_team_name
                 FROM matches m
                 JOIN teams ht ON m.home_team_id = ht.id
                 JOIN teams at ON m.away_team_id = at.id
-                WHERE m.league_id = ? AND m.season = ? AND m.status = 'FT' AND m.corners_home IS NOT NULL
+                WHERE m.league_id = ? AND m.season = ? AND {status_condition} AND m.corners_home IS NOT NULL
                 ORDER BY m.match_date DESC
             """
             params = [league_id, season]
@@ -576,13 +613,43 @@ class DatabaseManager:
     
     def get_matches_needing_corner_stats(self, league_id: int, season: int, limit: int = None) -> List[Dict]:
         """Get completed matches that need corner statistics imported for a specific league."""
+        status_condition = self._build_completed_status_condition(league_id, season)
+        
         with self.get_connection() as conn:
-            sql = """
+            sql = f"""
                 SELECT m.*, ht.name as home_team_name, at.name as away_team_name
                 FROM matches m
                 JOIN teams ht ON m.home_team_id = ht.id
                 JOIN teams at ON m.away_team_id = at.id
-                WHERE m.league_id = ? AND m.season = ? AND m.status = 'FT' AND m.corners_home IS NULL
+                WHERE m.league_id = ? AND m.season = ? AND {status_condition} AND m.corners_home IS NULL
+                ORDER BY m.match_date DESC
+            """
+            params = [league_id, season]
+            
+            if limit:
+                sql += " LIMIT ?"
+                params.append(limit)
+            
+            cursor = conn.execute(sql, params)
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def get_matches_needing_cards_stats(self, league_id: int, season: int, limit: int = None) -> List[Dict]:
+        """Get completed matches that need cards statistics imported for a specific league."""
+        status_condition = self._build_completed_status_condition(league_id, season)
+        
+        with self.get_connection() as conn:
+            sql = f"""
+                SELECT m.*, ht.name as home_team_name, at.name as away_team_name
+                FROM matches m
+                JOIN teams ht ON m.home_team_id = ht.id
+                JOIN teams at ON m.away_team_id = at.id
+                WHERE m.league_id = ? AND m.season = ? AND {status_condition} 
+                AND (
+                    (m.yellow_cards_home IS NULL OR m.yellow_cards_home = 0)
+                    AND (m.yellow_cards_away IS NULL OR m.yellow_cards_away = 0)
+                    AND (m.red_cards_home IS NULL OR m.red_cards_home = 0)
+                    AND (m.red_cards_away IS NULL OR m.red_cards_away = 0)
+                )
                 ORDER BY m.match_date DESC
             """
             params = [league_id, season]
@@ -628,18 +695,139 @@ class DatabaseManager:
             logger.error(f"Failed to update match {match_id} goals: {e}")
             return False
     
-    def get_matches_needing_goal_stats(self, season: int, limit: int = 100) -> List[Tuple]:
-        """Get matches that need goal statistics imported."""
+    def update_match_cards(self, match_id: int, yellow_home: int, yellow_away: int, 
+                          red_home: int, red_away: int) -> bool:
+        """Update match with cards statistics."""
+        try:
+            with self.get_connection() as conn:
+                # Calculate total cards (yellow + red for both teams)
+                total = yellow_home + yellow_away + red_home + red_away
+                
+                cursor = conn.execute("""
+                    UPDATE matches 
+                    SET yellow_cards_home = ?, yellow_cards_away = ?, 
+                        red_cards_home = ?, red_cards_away = ?,
+                        total_cards = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (yellow_home, yellow_away, red_home, red_away, total, match_id))
+                
+                conn.commit()
+                return cursor.rowcount > 0
+                
+        except Exception as e:
+            logger.error(f"Failed to update match {match_id} cards: {e}")
+            return False
+    
+    def _get_completed_match_statuses(self, league_id: int = None, season: int = None) -> List[str]:
+        """Auto-detect what status values this league uses for completed matches."""
         with self.get_connection() as conn:
-            cursor = conn.execute("""
-                SELECT m.api_fixture_id, m.id, ht.name as home_team, at.name as away_team, m.match_date
-                FROM matches m
-                JOIN teams ht ON m.home_team_id = ht.id  
-                JOIN teams at ON m.away_team_id = at.id
-                WHERE m.season = ? AND m.goals_home IS NULL AND m.status = 'FT'
-                ORDER BY m.match_date DESC
-                LIMIT ?
-            """, (season, limit))
+            if league_id and season:
+                cursor = conn.execute("""
+                    SELECT DISTINCT status, COUNT(*) as count
+                    FROM matches 
+                    WHERE league_id = ? AND season = ?
+                    AND (goals_home IS NOT NULL OR corners_home IS NOT NULL)
+                    GROUP BY status
+                    ORDER BY count DESC
+                """, (league_id, season))
+            elif league_id:
+                cursor = conn.execute("""
+                    SELECT DISTINCT status, COUNT(*) as count
+                    FROM matches 
+                    WHERE league_id = ?
+                    AND (goals_home IS NOT NULL OR corners_home IS NOT NULL)
+                    GROUP BY status
+                    ORDER BY count DESC
+                """, (league_id,))
+            else:
+                cursor = conn.execute("""
+                    SELECT DISTINCT status, COUNT(*) as count
+                    FROM matches 
+                    WHERE (goals_home IS NOT NULL OR corners_home IS NOT NULL)
+                    GROUP BY status
+                    ORDER BY count DESC
+                """)
+            
+            results = cursor.fetchall()
+            
+            # Get statuses from matches that have statistics (likely completed)
+            completed_statuses = [row[0] for row in results if row[0] not in ['NS', 'Not Started', 'LIVE', 'HT']]
+            
+            # If no matches have statistics yet, look for common completed status patterns
+            if not completed_statuses:
+                if league_id and season:
+                    cursor = conn.execute("""
+                        SELECT DISTINCT status, COUNT(*) as count
+                        FROM matches 
+                        WHERE league_id = ? AND season = ?
+                        GROUP BY status
+                        ORDER BY count DESC
+                    """, (league_id, season))
+                elif league_id:
+                    cursor = conn.execute("""
+                        SELECT DISTINCT status, COUNT(*) as count
+                        FROM matches 
+                        WHERE league_id = ?
+                        GROUP BY status
+                        ORDER BY count DESC
+                    """, (league_id,))
+                else:
+                    cursor = conn.execute("""
+                        SELECT DISTINCT status, COUNT(*) as count
+                        FROM matches 
+                        GROUP BY status
+                        ORDER BY count DESC
+                    """)
+                
+                all_statuses = [row[0] for row in cursor.fetchall()]
+                
+                # Common completed match status patterns
+                completed_patterns = ['FT', 'Match Finished', 'FINISHED', 'Finished', 'AET', 'PEN']
+                completed_statuses = [status for status in all_statuses if status in completed_patterns]
+            
+            # Fallback to common patterns if still empty
+            if not completed_statuses:
+                completed_statuses = ['FT', 'Match Finished']
+                
+            return completed_statuses
+    
+    def _build_completed_status_condition(self, league_id: int = None, season: int = None) -> str:
+        """Build SQL condition for completed match statuses."""
+        statuses = self._get_completed_match_statuses(league_id, season)
+        if len(statuses) == 1:
+            return f"m.status = '{statuses[0]}'"
+        else:
+            status_conditions = [f"m.status = '{status}'" for status in statuses]
+            return f"({' OR '.join(status_conditions)})"
+
+    def get_matches_needing_goal_stats(self, season: int, limit: int = 100, league_id: int = None) -> List[Tuple]:
+        """Get matches that need goal statistics imported for a specific league."""
+        status_condition = self._build_completed_status_condition(league_id, season)
+        
+        with self.get_connection() as conn:
+            if league_id:
+                cursor = conn.execute(f"""
+                    SELECT m.api_fixture_id, m.id, ht.name as home_team, at.name as away_team, m.match_date
+                    FROM matches m
+                    JOIN teams ht ON m.home_team_id = ht.id  
+                    JOIN teams at ON m.away_team_id = at.id
+                    WHERE m.season = ? AND m.league_id = ? AND m.goals_home IS NULL 
+                    AND {status_condition}
+                    ORDER BY m.match_date DESC
+                    LIMIT ?
+                """, (season, league_id, limit))
+            else:
+                cursor = conn.execute(f"""
+                    SELECT m.api_fixture_id, m.id, ht.name as home_team, at.name as away_team, m.match_date
+                    FROM matches m
+                    JOIN teams ht ON m.home_team_id = ht.id  
+                    JOIN teams at ON m.away_team_id = at.id
+                    WHERE m.season = ? AND m.goals_home IS NULL 
+                    AND {status_condition}
+                    ORDER BY m.match_date DESC
+                    LIMIT ?
+                """, (season, limit))
             return cursor.fetchall()
     
     # PREDICTIONS OPERATIONS

@@ -12,8 +12,9 @@ from data.consistency_analyzer import ConsistencyAnalyzer, PredictionResult, pre
 from data.team_analyzer import analyze_team
 from data.head_to_head_analyzer import HeadToHeadAnalyzer, analyze_head_to_head
 from data.prediction_storage import PredictionStorageManager
-from data.prediction_models import MatchPrediction, MatchInfo, PredictionData, LinePredictions, GoalPredictions, QualityMetrics, TeamAnalysis, AnalysisData
+from data.prediction_models import MatchPrediction, MatchInfo, PredictionData, LinePredictions, GoalPredictions, CardsPredictions, QualityMetrics, TeamAnalysis, AnalysisData
 from data.goal_analyzer import GoalAnalyzer
+from data.cards_analyzer import CardsAnalyzer
 from config import Config
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ class PredictionEngine:
         self.h2h_analyzer = HeadToHeadAnalyzer()
         self.storage_manager = PredictionStorageManager()
         self.goal_analyzer = GoalAnalyzer()
+        self.cards_analyzer = CardsAnalyzer()
         
         logger.info("Prediction Engine initialized")
     
@@ -105,6 +107,26 @@ class PredictionEngine:
                 logger.warning(f"Failed to generate BTTS predictions: {e}")
                 goal_predictions = None
             
+            # Generate cards predictions
+            try:
+                logger.info(f"Generating cards predictions for teams {home_team_id} vs {away_team_id}")
+                
+                # Generate match cards prediction
+                cards_prediction = self.cards_analyzer.predict_match_cards(home_team_id, away_team_id, season)
+                
+                if cards_prediction:
+                    cards_predictions = CardsPredictions(
+                        match_cards=cards_prediction
+                    )
+                    logger.info(f"Cards predictions completed - Total: {cards_prediction.get('total_cards', 'N/A')}, O2.5: {cards_prediction.get('over_2_5', 'N/A')}%")
+                else:
+                    cards_predictions = None
+                    logger.warning("Cards prediction failed - no data available")
+                    
+            except Exception as e:
+                logger.warning(f"Failed to generate cards predictions: {e}")
+                cards_predictions = None
+            
             match_prediction = MatchPrediction(
                 match_info=MatchInfo(
                     home_team=home_team['name'],
@@ -130,6 +152,7 @@ class PredictionEngine:
                     over_7_5_confidence=line_predictions['over_7_5']['confidence']
                 ),
                 goal_predictions=goal_predictions,
+                cards_predictions=cards_predictions,
                 quality_metrics=QualityMetrics(
                     prediction_quality=prediction_result.prediction_quality,
                     statistical_confidence=prediction_result.statistical_confidence,

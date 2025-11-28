@@ -43,6 +43,11 @@ class GoalPredictions:
     btts_2plus: Optional[Dict[str, Any]] = None  # Full 2+ goals BTTS prediction from GoalAnalyzer
 
 @dataclass
+class CardsPredictions:
+    """Cards predictions for match."""
+    match_cards: Dict[str, Any]  # Full cards prediction from CardsAnalyzer
+
+@dataclass
 class QualityMetrics:
     """Prediction quality metrics."""
     prediction_quality: str
@@ -77,6 +82,9 @@ class MatchPrediction:
     
     # Goal predictions (BTTS, etc.)
     goal_predictions: Optional[GoalPredictions]
+    
+    # Cards predictions
+    cards_predictions: Optional[CardsPredictions]
     
     # Quality metrics
     quality_metrics: QualityMetrics
